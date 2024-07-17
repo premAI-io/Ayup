@@ -1,0 +1,3 @@
+linters-settings:
+  unused:
+      field-writes-are-uses: false

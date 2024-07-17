@@ -1,0 +1,114 @@
+name: CI
+
+on:
+  push:
+    tags: ['*']
+    branches: ['main']
+  pull_request:
+
+jobs:
+  generate-src:
+    runs-on: ubuntu-22.04
+    permissions:
+      id-token: "write"
+      contents: "read"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+      - name: generate-src
+        run: nix build -L .#src
+      - uses: actions/upload-artifact@v4
+        with:
+            name: src
+            path: result/
+
+  build-lint:
+    runs-on: ubuntu-22.04
+    permissions:
+      id-token: "write"
+      contents: "read"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+      - name: build-lint
+        run: nix build -L .#cli
+
+  build-cross:
+    runs-on: ubuntu-22.04
+    permissions:
+      id-token: "write"
+      contents: "read"
+    strategy:
+      matrix:
+        platform: [darwin-amd64, darwin-arm64, linux-amd64, linux-arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+      - name: build-lint
+        run: nix build -L .#cli-${{ matrix.platform }}
+      - uses: actions/upload-artifact@v4
+        with:
+            name: cli-${{ matrix.platform }}
+            path: result/bin/ay
+
+  release-dryrun:
+    runs-on: ubuntu-22.04
+    needs: [build-lint, build-cross, generate-src]
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/download-artifact@v4
+      - name: list artifacts
+        run: |
+          find
+          cd src
+          tar -czvf ../generated-src.tar.gz *
+          cd ../
+          mv src/go/version.txt ./
+          rm -r src
+          for d in cli-*; do
+            mv $d/ay ay-${d#cli-}
+            rmdir $d
+          done
+          find
+
+  release:
+    runs-on: ubuntu-22.04
+    needs: [build-lint, build-cross, generate-src]
+    if: github.ref_type == 'tag'
+    permissions:
+      id-token: write
+      contents: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@v4
+      - name: prepare-artifacts
+        run: |
+          cd src
+          tar -czvf ../generated-src.tar.gz *
+          cd ../
+          echo ver=$(cat src/go/version.txt) | tee -a "$GITHUB_OUTPUT"
+          rm -r src
+          for d in cli-*; do
+            mv $d/ay ay-${d#cli-}
+            rmdir $d
+          done
+      - name: check-version
+        run: |
+            if [[ ${{ github.ref }} =~ ${{ steps.prepare-artifacts.outputs.ver }}$ ]]; then
+                echo ok
+            else
+                echo "::error file=go/version.txt::Tag doesn't match version"
+                exit 1
+            fi
+      - name: attest
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: '*'
+      - uses: softprops/action-gh-release@v2
+        with:
+          prerelease: ${{ contains(github.ref, '-rc') }}
+          files: "*"
+          draft: true

@@ -1,0 +1,111 @@
+package srv
+
+import (
+	"os"
+	"os/exec"
+	"path/filepath"
+
+	tr "go.opentelemetry.io/otel/trace"
+	"google.golang.org/grpc"
+
+	pb "premai.io/Ayup/go/internal/grpc/srv"
+	"premai.io/Ayup/go/internal/trace"
+)
+
+type ActServer interface {
+	Send(*pb.ActReply) error
+	Recv() (*pb.ActReq, error)
+	grpc.ServerStream
+}
+
+func (s *Srv) Analysis(stream pb.Srv_AnalysisServer) error {
+	ctx := stream.Context()
+	span := tr.SpanFromContext(ctx)
+	ctx = trace.SetSpanKind(ctx, tr.SpanKindServer)
+
+	sendError := mkSendError(ctx, stream)
+	internalError := mkInternalError(ctx, stream)
+
+	recvChan := mkRecvChan(ctx, stream)
+
+	// TODO: Check if we are dealing with an existing session etc.
+	r, ok := <-recvChan
+	if !ok {
+		return internalError("stream recv: channel closed")
+	}
+	if r.err != nil {
+		return internalError("stream recv: %w", r.err)
+	}
+
+	if r.req.Cancel {
+		return sendError("analysis canceled")
+	}
+
+	if r.req.Choice != nil {
+		return sendError("premature choice")
+	}
+
+	if _, err := os.Stat(filepath.Join(s.SrcDir, "requirements.txt")); err != nil {
+		ctx, span := trace.Span(ctx, "requirements")
+		defer span.End()
+
+		if !os.IsNotExist(err) {
+			return internalError("stat requirements.txt: %w", err)
+		}
+
+		span.AddEvent("No requirements.txt")
+		err := stream.Send(&pb.ActReply{
+			Source: "ayup",
+			Variant: &pb.ActReply_Choice{
+				Choice: &pb.Choice{
+					Variant: &pb.Choice_Bool{
+						Bool: &pb.ChoiceBool{
+							Value:       true,
+							Title:       "No requirements.txt; try guessing it?",
+							Description: "Guess what dependencies the program has by inspecting the source code.",
+							Affirmative: "Yes, guess",
+							Negative:    "No, I'll make it",
+						},
+					},
+				},
+			},
+		})
+		if err != nil {
+			return internalError("stream send: %w", err)
+		}
+
+		span.AddEvent("Waiting for choice")
+		r, ok := <-recvChan
+		if !ok {
+			return internalError("stream recv: channel closed")
+		}
+		if r.err != nil {
+			return internalError("stream recv: %w", r.err)
+		}
+
+		if r.req.Cancel {
+			return sendError("analysis canceled")
+		}
+
+		choice := r.req.Choice.GetBool()
+		if choice == nil {
+			return sendError("expected choice for requirements.txt")
+		} else if !choice.Value {
+			return sendError("can't continue without requirements.txt; please provide one!")
+		}
+
+		span.AddEvent("Creating requirements.txt")
+		cmd := exec.Command("pipreqs", s.SrcDir)
+
+		procWait := mkProcWaiter(ctx, stream, recvChan)
+		in, out := startProc(ctx, cmd)
+
+		if err = procWait("pipreqs", in, out); err != nil {
+			return err
+		}
+	} else {
+		span.AddEvent("requirements.txt exists")
+	}
+
+	return nil
+}
