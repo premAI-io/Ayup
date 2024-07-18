@@ -1,3 +1,89 @@
+# Vision
+
+Ayup will figure out how to build, run and serve some AI/ML inference code you provide on a remote
+(or local) computer. It saves you time when dealing with unfamiliar code and makes using a remote
+machine for building and executing code easy.
+
+Ayup avoids relying on you to read documentation and write configuration files. Instead it tries to
+solve problems with you interactively.
+
+![ayup-push-1](https://github.com/user-attachments/assets/9b7c5ff9-e2a3-4a90-a0d8-4262c78dc6d5)
+
+Both the Ayup server and client are open source. The Ayup server can run on most Linux systems and
+the client on Linux, Mac and (eventually) Windows. The intention is that it is easy for you to self
+host the Ayup server.
+
+Web applications have their ports forwarded to the client. Allowing them to be accessed as if they
+were running locally. Applications can also be served on a sub-domain of the server via the builtin
+proxy.
+
+The initial focus of Ayup is on AI/ML applications which provide some inference service.
+
+# State / Roadmap
+
+Ayup is in the early stages of production. Some of the things that have been done so far are
+
+- [x] Quick source upload
+- [x] Build and serve Python applications of a particular form
+- [x] Port forwarding to client with fixed ports
+- [x] Containerd support (allows instant loading of containers and future k8s support)
+- [x] Subdomain routing
+- [x] Build and run applications with a Dockerfile
+
+In the pipeline (in no particular order)
+
+- [ ] Detect appropriate ports to forward
+- [ ] Multiple simultaneous applications
+- [ ] Pluggable analysis/build/run step(s)
+- [ ] Secure server login and connection
+- [ ] Bundle rootless Containerd, Buildkit, Nerdctl with the server
+
+# Install
+
+The client CLI can be installed by copying the following into a terminal session:
+
+```sh
+curl -#L https://raw.githubusercontent.com/premAI-io/Ayup/main/script/install.sh | sh
+```
+
+Or you can download the executable from the [release page](https://github.com/premAI-io/Ayup/releases/latest).
+It's just one file, you can copy it to `/usr/bin` or wherever you put executables on your system.
+
+Presently the server is in the same executable as the client. However it has some dependencies which
+are a pain. Eventually we'll magic these away, but in the mean time see the Development section.
+
+# Running
+
+## Client
+
+Enter the directory where the source of the project you wish to run is and do
+
+```sh
+$ ay push
+```
+
+For now this will stupidly try to connect to localhost. Until we create a secure login process
+you will need to set the remote address (see `ay --help`)
+
+## Server
+
+The server can be run as root with
+
+```sh
+$ ay daemon start
+```
+
+This requires a Buildkitd instance to be running and pointed at a Containerd worker. This is not
+such a common thing, so see the development section for now which has details on using Nix to get
+them. Eventually we will bundle these up.
+
+Often you will need to set the Containerd address which can be done with an environment var or
+command line option, see `ay daemon start --help`.
+
+Installing Docker or Kubernetes will provide a Containerd instance. It's socket will be somewhere
+like `/run/containerd/containerd.sock`, `/run/docker/containerd/containerd.sock` or
+`/run/k3s/containerd/containerd.sock`.
+
 # Development
 
 Ayup is a standard Go project and thus easy to build in most enviroments. However Nix
@@ -15,14 +101,20 @@ Then there is a choice between using the Nix dev shell...
 
 Or using Nix to build/run the project...
 
-3. `nix run .#dev` in another terminal to start buildkit
-4. `nix build` build the whole project
+3. `sudo nix run .#dev` in another terminal to start buildkit
+4. `sudo nix run .#server` run the server
 5. `nix run .#cli` run the cli
 
-Presently Docker and buildkit are required to be present. Buildkit is provided by Nix,
-but Docker needs to be installed by other means.
+Also you don't need to Git clone this project onto a system to run it with Nix. You can run the
+flake from this repo with
 
-## Logs and tracing
+`sudo nix run github:premAI-io/Ayup#<dev,server,cli>`
+
+Or if you want to try out a dev branch
+
+`sudo nix run github:<user>/<repo>/<branch>#<dev,server,cli>`
+
+# Logs and tracing
 
 Open Telemetry is used to collect ~~logs and~~ traces which requires some kind of collector and UI.
 To use Jaeger on your local system do
