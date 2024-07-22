@@ -130,7 +130,8 @@ func (s *Srv) Run(stream pb.Srv_RunServer) (err error) {
 		procWait := mkProcWaiter(ctx, stream, recvChan)
 
 		cmd := exec.Command(
-			"docker", "run", "--rm", "-p", "127.0.0.1:5000:5000", s.ImgName, "python3", "/app/__main__.py",
+			"nerdctl", "--address", s.ContainerdAddr, "--namespace", "buildkit",
+			"run", "--rm", "-p", "127.0.0.1:5000:5000", s.ImgName, "python3", "/app/__main__.py",
 		)
 		in, out := startProc(ctx, cmd)
 		proxy := mkProxy()
@@ -145,7 +146,7 @@ func (s *Srv) Run(stream pb.Srv_RunServer) (err error) {
 			}
 		}()
 
-		return procWait("docker run", in, out)
+		return procWait("nerdctl run", in, out)
 	}(); err != nil {
 		return
 	}

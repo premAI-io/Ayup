@@ -27,6 +27,9 @@ type Srv struct {
 	SrcDir     string
 	ImgTarPath string
 	ImgName    string
+
+	ContainerdAddr string
+	BuildkitdAddr string
 }
 
 func newErrorReply(error string) *pb.ActReply {
