@@ -105,6 +105,21 @@ func (s *Srv) Analysis(stream pb.Srv_AnalysisServer) error {
 		}
 	} else {
 		span.AddEvent("requirements.txt exists")
+
+		if err := stream.Send(&pb.ActReply{
+			Source: "Ayup",
+			Variant: &pb.ActReply_Log{
+				Log: "requirements.txt found",
+			},
+		}); err != nil {
+			return internalError("stream send: %w", err)
+		}
+
+		if err := stream.Send(&pb.ActReply{
+			Source: "Ayup",
+		}); err != nil {
+			return internalError("stream send: %w", err)
+		}
 	}
 
 	return nil
