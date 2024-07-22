@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os"
 	"os/exec"
+	"strings"
 
 	"github.com/moby/buildkit/client/llb"
 
@@ -48,14 +48,22 @@ func (s *Srv) Build(stream pb.Srv_BuildServer) (err error) {
 
 		procWait := mkProcWaiter(ctx, stream, recvChan)
 
-		uid := os.Getuid()
 		cmd := exec.Command(
 			"buildctl",
-			"--addr", fmt.Sprintf("unix:///run/user/%d/buildkit/buildkitd.sock", uid),
+			"--addr", s.BuildkitdAddr,
 			"build",
-			"--output", fmt.Sprintf("type=docker,name=%s,dest=%s", s.ImgName, s.ImgTarPath),
+			"--output", fmt.Sprintf("type=image,name=%s", s.ImgName),
 			"--local", fmt.Sprintf("context=%s", s.SrcDir),
 		)
+
+		// https://github.com/moby/moby/issues/46129#issuecomment-2016552967
+		var env []string
+		for _, kv := range cmd.Environ() {
+			if !strings.HasPrefix(kv, "OTEL_EXPORTER_OTLP_ENDPOINT=") {
+				env = append(env, kv)
+			}
+		}
+		cmd.Env = env
 
 		in, out := startProc(ctx, cmd)
 
@@ -64,20 +72,6 @@ func (s *Srv) Build(stream pb.Srv_BuildServer) (err error) {
 		}
 
 		return procWait("buildctl", in, out)
-	}(); err != nil {
-		return
-	}
-
-	if err = func() (err error) {
-		ctx, span := trace.Span(ctx, "docker load")
-		defer span.End()
-
-		procWait := mkProcWaiter(ctx, stream, recvChan)
-
-		cmd := exec.Command("docker", "load", "--input", s.ImgTarPath)
-		in, out := startProc(ctx, cmd)
-
-		return procWait("docker load", in, out)
 	}(); err != nil {
 		return
 	}

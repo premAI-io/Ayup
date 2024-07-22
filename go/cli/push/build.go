@@ -69,7 +69,6 @@ func (s *Pusher) Build(ctx context.Context) (err error) {
 		}
 	}()
 
-	doneCount := 0
 loop:
 	for {
 		select {
@@ -113,12 +112,8 @@ loop:
 				err = terror.Errorf(ctx, "remote error: %s", e.Error)
 			}
 
-			// 1. buildctl 2. docker load
-			doneCount += 1
-			if doneCount >= 2 {
-				logViewProg.Send(DoneMsg{})
-				break loop
-			}
+			logViewProg.Send(DoneMsg{})
+			break loop
 		}
 	}
 

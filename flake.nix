@@ -16,6 +16,7 @@
           rootlesskit
           runc
           buildkit
+          nerdctl
       ];
       goDevPkgs = with pkgs; [
         go

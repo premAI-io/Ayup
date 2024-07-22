@@ -57,6 +57,8 @@ func (s *PushCmd) Run(g Globals) (err error) {
 }
 
 type DaemonStartCmd struct {
+	ContainerdAddr string `env:"AYUP_CONTAINERD_ADDR" help:"The path to the containerd socket if not using Docker's" default:"/var/run/docker/containerd/containerd.sock"`
+	BuildkitdAddr string `env:"AYUP_BUILDKITD_ADDR" help:"The path to the buildkitd socket if not the default" default:"unix:///run/buildkit/buildkitd.sock"`
 }
 
 func (s *DaemonStartCmd) Run(g Globals) (err error) {
@@ -73,6 +75,9 @@ func (s *DaemonStartCmd) Run(g Globals) (err error) {
 			SrcDir:     filepath.Join(tmp, "src"),
 			ImgTarPath: filepath.Join(tmp, "image.tar"),
 			ImgName:    "docker.io/richardprem/ayup:test",
+
+			ContainerdAddr: s.ContainerdAddr,
+			BuildkitdAddr: s.BuildkitdAddr,
 		}
 
 		err = r.RunServer(ctx)
@@ -99,6 +104,7 @@ var cli struct {
 
 	Daemon struct {
 		Start DaemonStartCmd `cmd:"" help:"Start an Ayup service Daemon"`
+
 	} `cmd:"" help:"Self host Ayup"`
 
 	// maybe effected by https://github.com/open-telemetry/opentelemetry-go/issues/5562

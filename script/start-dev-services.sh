@@ -1,6 +1,5 @@
 #!/bin/sh -eu
 
-echo Starting rootless buildkit
-echo Test with buildctl --addr unix:///run/user/$UID/buildkit/buildkit.sock du
+echo Starting buildkit
 
-rootlesskit --net=slirp4netns --copy-up=/etc --disable-host-loopback buildkitd
+buildkitd --oci-worker false --containerd-worker-addr /run/docker/containerd/containerd.sock
