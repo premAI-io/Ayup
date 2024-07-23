@@ -80,7 +80,6 @@ func (s *Srv) Sync(stream pb.Srv_SyncServer) error {
 
 			dstPath := filepath.Join(s.SrcDir, path)
 
-			closeFile := true
 			file, alreadyOpen := openFiles[dstPath]
 			if !alreadyOpen {
 				dir := filepath.Dir(dstPath)
@@ -90,28 +89,23 @@ func (s *Srv) Sync(stream pb.Srv_SyncServer) error {
 					return internalError("mkdirall: %w", err)
 				}
 
+				trace.Event(ctx, "open/create file", attr.String("path", path))
 				file, err = os.OpenFile(dstPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)
 				if err != nil {
 					return internalError("open file: %w", err)
 				}
-			}
 
-			defer func() {
-				if closeFile {
-					if alreadyOpen {
-						delete(openFiles, dstPath)
-					}
-					file.Close()
-				} else {
-					openFiles[dstPath] = file
-				}
-			}()
+				openFiles[dstPath] = file
+			}
 
 			if _, err := file.Write(chunk.Data); err != nil {
 				return internalError("write file: %w", err)
 			}
 
-			closeFile = chunk.Last
+			if chunk.Last {
+				terror.Ackf(ctx, "file close: %w", file.Close())
+				delete(openFiles, dstPath)
+			}
 		}
 	}
 
