@@ -1,6 +1,7 @@
 package srv
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,6 +17,43 @@ type ActServer interface {
 	Send(*pb.ActReply) error
 	Recv() (*pb.ActReq, error)
 	grpc.ServerStream
+}
+
+func (s *Srv) useDockerfile(ctx context.Context, stream pb.Srv_AnalysisServer) (bool, error) {
+	internalError := mkInternalError(ctx, stream)
+
+	_, err := os.Stat(filepath.Join(s.SrcDir, "Dockerfile"))
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return false, internalError("stat Dockerfile: %w", err)
+		}
+
+		return false, nil
+	}
+
+	if err := stream.Send(&pb.ActReply{
+		Source: "ayup",
+		Variant: &pb.ActReply_Log{
+			Log: "Found Dockerfile, will use it",
+		},
+	}); err != nil {
+		return false, internalError("stream send: %w", err)
+	}
+
+	s.push.analysis = &pb.AnalysisResult{
+		UseDockerfile: true,
+	}
+
+	if err := stream.Send(&pb.ActReply{
+		Source: "ayup",
+		Variant: &pb.ActReply_AnalysisResult{
+			AnalysisResult: s.push.analysis,
+		},
+	}); err != nil {
+		return false, internalError("stream send: %w", err)
+	}
+
+	return true, nil
 }
 
 func (s *Srv) Analysis(stream pb.Srv_AnalysisServer) error {
@@ -43,6 +81,10 @@ func (s *Srv) Analysis(stream pb.Srv_AnalysisServer) error {
 
 	if r.req.Choice != nil {
 		return sendError("premature choice")
+	}
+
+	if useDockerfile, err := s.useDockerfile(ctx, stream); useDockerfile || err != nil {
+		return err
 	}
 
 	if _, err := os.Stat(filepath.Join(s.SrcDir, "requirements.txt")); err != nil {
@@ -114,12 +156,19 @@ func (s *Srv) Analysis(stream pb.Srv_AnalysisServer) error {
 		}); err != nil {
 			return internalError("stream send: %w", err)
 		}
+	}
 
-		if err := stream.Send(&pb.ActReply{
-			Source: "Ayup",
-		}); err != nil {
-			return internalError("stream send: %w", err)
-		}
+	s.push.analysis = &pb.AnalysisResult{
+		UsePythonRequirements: true,
+	}
+
+	if err := stream.Send(&pb.ActReply{
+		Source: "Ayup",
+		Variant: &pb.ActReply_AnalysisResult{
+			AnalysisResult: s.push.analysis,
+		},
+	}); err != nil {
+		return internalError("stream send: %w", err)
 	}
 
 	return nil

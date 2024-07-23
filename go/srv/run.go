@@ -123,16 +123,22 @@ func (s *Srv) Run(stream pb.Srv_RunServer) (err error) {
 
 	recvChan := mkRecvChan(ctx, stream)
 
+	cmdArgs := []string{
+		"--address", s.ContainerdAddr, "--namespace", "buildkit",
+		"run", "--rm", "-p", "127.0.0.1:5000:5000", s.ImgName,
+	}
+
+	if s.push.analysis.UsePythonRequirements {
+		cmdArgs = append(cmdArgs, "python3", "/app/__main__.py")
+	}
+
 	if err = func() (err error) {
 		ctx, span := trace.Span(ctx, "docker run")
 		defer span.End()
 
 		procWait := mkProcWaiter(ctx, stream, recvChan)
 
-		cmd := exec.Command(
-			"nerdctl", "--address", s.ContainerdAddr, "--namespace", "buildkit",
-			"run", "--rm", "-p", "127.0.0.1:5000:5000", s.ImgName, "python3", "/app/__main__.py",
-		)
+		cmd := exec.Command("nerdctl", cmdArgs...)
 		in, out := startProc(ctx, cmd)
 		proxy := mkProxy()
 		go func() {

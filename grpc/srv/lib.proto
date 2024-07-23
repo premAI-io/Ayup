@@ -75,15 +75,21 @@ message Chosen {
     }
 }
 
+message AnalysisResult {
+    bool useDockerfile = 1;
+    bool usePythonRequirements = 2;
+}
+
 // Generic streamed reply to actions
 message ActReply {
     oneof variant {
         string log = 2;
         Choice choice = 3;
-        Error error = 4;
+        AnalysisResult analysisResult = 4;
+        Error error = 5;
     }
 
-    string source = 5;
+    string source = 6;
 }
 
 // generic streamed request for an action
