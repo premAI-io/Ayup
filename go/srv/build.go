@@ -16,6 +16,18 @@ import (
 	"premai.io/Ayup/go/internal/trace"
 )
 
+func filterEnv(cmd *exec.Cmd) []string {
+	// https://github.com/moby/moby/issues/46129#issuecomment-2016552967
+	var env []string
+	for _, kv := range cmd.Environ() {
+		if !strings.HasPrefix(kv, "OTEL_EXPORTER_OTLP_ENDPOINT=") {
+			env = append(env, kv)
+		}
+	}
+
+	return env
+}
+
 func (s *Srv) Build(stream pb.Srv_BuildServer) (err error) {
 	ctx := stream.Context()
 	ctx = trace.SetSpanKind(ctx, tr.SpanKindServer)
@@ -23,6 +35,28 @@ func (s *Srv) Build(stream pb.Srv_BuildServer) (err error) {
 	recvChan := mkRecvChan(ctx, stream)
 
 	var buf bytes.Buffer
+
+	if s.push.analysis.UseDockerfile {
+		ctx, span := trace.Span(ctx, "buildctl")
+		defer span.End()
+
+		procWait := mkProcWaiter(ctx, stream, recvChan)
+
+		cmd := exec.Command(
+			"buildctl",
+			"--addr", s.BuildkitdAddr,
+			"build",
+			"--frontend=dockerfile.v0",
+			"--output", fmt.Sprintf("type=image,name=%s", s.ImgName),
+			"--local", fmt.Sprintf("context=%s", s.SrcDir),
+			"--local", fmt.Sprintf("dockerfile=%s", s.SrcDir),
+		)
+		cmd.Env = filterEnv(cmd)
+
+		in, out := startProc(ctx, cmd)
+
+		return procWait("buildctl", in, out)
+	}
 
 	if err = func() error {
 		ctx, span := trace.Span(ctx, "mkLlb")
@@ -55,15 +89,7 @@ func (s *Srv) Build(stream pb.Srv_BuildServer) (err error) {
 			"--output", fmt.Sprintf("type=image,name=%s", s.ImgName),
 			"--local", fmt.Sprintf("context=%s", s.SrcDir),
 		)
-
-		// https://github.com/moby/moby/issues/46129#issuecomment-2016552967
-		var env []string
-		for _, kv := range cmd.Environ() {
-			if !strings.HasPrefix(kv, "OTEL_EXPORTER_OTLP_ENDPOINT=") {
-				env = append(env, kv)
-			}
-		}
-		cmd.Env = env
+		cmd.Env = filterEnv(cmd)
 
 		in, out := startProc(ctx, cmd)
 

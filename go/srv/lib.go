@@ -20,6 +20,10 @@ import (
 	tr "go.opentelemetry.io/otel/trace"
 )
 
+type Push struct {
+	analysis *pb.AnalysisResult
+}
+
 type Srv struct {
 	pb.UnimplementedSrvServer
 
@@ -30,6 +34,9 @@ type Srv struct {
 
 	ContainerdAddr string
 	BuildkitdAddr string
+
+	// Instance of a push, here while we don't have apps, users, sessions etc.
+	push Push
 }
 
 func newErrorReply(error string) *pb.ActReply {

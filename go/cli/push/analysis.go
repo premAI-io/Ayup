@@ -30,7 +30,8 @@ type AnalysisView struct {
 	choice  *huh.Form
 	spinner spinner.Model
 
-	done bool
+	done   bool
+	result *pb.AnalysisResult
 
 	braceStyle  lipgloss.Style
 	nameStyle   lipgloss.Style
@@ -38,6 +39,7 @@ type AnalysisView struct {
 }
 
 type choiceMsg *pb.ChoiceBool
+type resultMsg *pb.AnalysisResult
 
 func NewAnalysisView(ctx context.Context, stream pb.Srv_AnalysisClient) AnalysisView {
 	var hist strings.Builder
@@ -87,8 +89,13 @@ func (s AnalysisView) recvMsgCmd() tea.Cmd {
 			return choiceMsg(choice)
 		}
 
+		result := res.GetAnalysisResult()
+		if result != nil {
+			return resultMsg(result)
+		}
+
 		if res.Variant == nil {
-			// Success (TODO: this should be explicit in the protocol)
+			// TODO: sent by proc watcher for success, not needed for analysis anymore
 			return DoneMsg{}
 		} else {
 			return terror.Errorf(s.ctx, "Can't handle remote response: %v", res)
@@ -165,11 +172,16 @@ func (s AnalysisView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		return s, tea.Batch(f.Init(), s.recvMsgCmd())
 	case DoneMsg:
+		// TODO: remove when removed from proc watcher
+		return s, nil
+	case resultMsg:
 		if err := s.stream.CloseSend(); err != nil {
 			terror.Ackf(s.ctx, "close send: %w", err)
 		}
 
 		s.done = true
+		s.result = msg
+
 		return s, tea.Quit
 	case spinner.TickMsg:
 		var cmd tea.Cmd
@@ -233,13 +245,13 @@ func (s AnalysisView) View() string {
 	}
 }
 
-func (s *Pusher) Analysis(pctx context.Context) (err error) {
+func (s *Pusher) Analysis(pctx context.Context) (result *pb.AnalysisResult, err error) {
 	ctx, span := trace.Span(pctx, "analysis")
 	defer span.End()
 
 	stream, err := s.Client.Analysis(ctx)
 	if err != nil {
-		return terror.Errorf(ctx, "client analysis: %w", err)
+		return nil, terror.Errorf(ctx, "client analysis: %w", err)
 	}
 	defer func() {
 		err2 := stream.CloseSend()
@@ -250,22 +262,22 @@ func (s *Pusher) Analysis(pctx context.Context) (err error) {
 
 	err = stream.Send(&pb.ActReq{})
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	view := NewAnalysisView(ctx, stream)
 	prog := tea.NewProgram(view, tea.WithContext(ctx))
-	_, err = prog.Run()
+	model, err := prog.Run()
 
 	msg, err := stream.Recv()
 	if msg != nil {
 		trace.Event(ctx, "stream rcv", attr.String("msg", msg.String()))
 	}
 	if err != io.EOF {
-		return terror.Errorf(ctx, "stream recv should end: %w", err)
+		return nil, terror.Errorf(ctx, "stream recv should end: %w", err)
 	} else {
 		err = nil
 	}
 
-	return
+	return model.(AnalysisView).result, err
 }

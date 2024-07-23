@@ -132,7 +132,8 @@ func (s *Pusher) Run(ctx context.Context) error {
 		return err
 	}
 
-	if err := s.Analysis(ctx); err != nil {
+	_, err = s.Analysis(ctx)
+	if err != nil {
 		return err
 	}
 
