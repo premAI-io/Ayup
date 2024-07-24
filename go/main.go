@@ -100,7 +100,7 @@ func (s *LoginCmd) Run(g Globals) error {
 
 var cli struct {
 	Push  PushCmd  `cmd:"" help:"Figure out how to deploy your application"`
-	Login LoginCmd `cmd:"" help:"Login to the Ayup service"`
+	Login LoginCmd `cmd:"" help:"Login to the Ayup service" hidden:""`
 
 	Daemon struct {
 		Start DaemonStartCmd `cmd:"" help:"Start an Ayup service Daemon"`
