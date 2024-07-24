@@ -173,7 +173,7 @@ func (s AnalysisView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return s, tea.Batch(f.Init(), s.recvMsgCmd())
 	case DoneMsg:
 		// TODO: remove when removed from proc watcher
-		return s, nil
+		return s, s.recvMsgCmd()
 	case resultMsg:
 		if err := s.stream.CloseSend(); err != nil {
 			terror.Ackf(s.ctx, "close send: %w", err)
