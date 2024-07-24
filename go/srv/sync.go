@@ -42,6 +42,12 @@ func (s *Srv) Sync(stream pb.Srv_SyncServer) error {
 		return sendErrorClose("internal error")
 	}
 
+	if _, err := os.Stat(s.SrcDir); err == nil {
+		if err := os.RemoveAll(s.SrcDir); err != nil {
+			return internalError("RemoveAll: %w", err)
+		}
+	}
+
 	for {
 		chunks, err := stream.Recv()
 
