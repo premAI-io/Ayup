@@ -7,6 +7,7 @@ let
 in
 buildGoModule {
   pname = "ayup-cli";
+  meta.mainProgram = "ay";
   version = version;
   src = srcWithProtobuf;
   modRoot = "./go";
