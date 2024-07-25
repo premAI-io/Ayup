@@ -54,6 +54,9 @@
         GOOS = "linux";
         GOARCH = "amd64";
       };
+      server = pkgs.callPackage ./distros/nix/server.nix {
+        inherit version cli;
+      };
   in
     {
       devShells.${system}.default = pkgs.mkShell {
@@ -67,6 +70,8 @@
       packages.${system} = {
         inherit src;
         inherit cli cli-darwin-amd64 cli-darwin-arm64 cli-linux-arm64 cli-linux-amd64;
+        inherit server;
+
         default = cli;
         dev = pkgs.stdenv.mkDerivation {
           pname = "dev";
