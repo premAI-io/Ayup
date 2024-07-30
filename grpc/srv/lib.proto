@@ -78,6 +78,8 @@ message Chosen {
 message AnalysisResult {
     bool useDockerfile = 1;
     bool usePythonRequirements = 2;
+
+    bool needsGit = 3;
 }
 
 // Generic streamed reply to actions

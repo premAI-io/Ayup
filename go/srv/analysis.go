@@ -1,10 +1,12 @@
 package srv
 
 import (
+	"bufio"
 	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 
 	tr "go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
@@ -87,7 +89,9 @@ func (s *Srv) Analysis(stream pb.Srv_AnalysisServer) error {
 		return err
 	}
 
-	if _, err := os.Stat(filepath.Join(s.SrcDir, "requirements.txt")); err != nil {
+	requirements_path := filepath.Join(s.SrcDir, "requirements.txt")
+
+	if _, err := os.Stat(requirements_path); err != nil {
 		ctx, span := trace.Span(ctx, "requirements")
 		defer span.End()
 
@@ -160,6 +164,22 @@ func (s *Srv) Analysis(stream pb.Srv_AnalysisServer) error {
 
 	s.push.analysis = &pb.AnalysisResult{
 		UsePythonRequirements: true,
+	}
+
+	requirementsFile, err := os.OpenFile(requirements_path, os.O_RDONLY, 0)
+	if err != nil {
+		return internalError("open file: %w", err)
+	}
+	defer requirementsFile.Close()
+
+	gitRegex := regexp.MustCompile(`@\s+git`)
+	lines := bufio.NewScanner(requirementsFile)
+	for lines.Scan() {
+		line := lines.Text()
+
+		if gitRegex.MatchString(line) {
+			s.push.analysis.NeedsGit = true
+		}
 	}
 
 	if err := stream.Send(&pb.ActReply{

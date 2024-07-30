@@ -111,8 +111,13 @@ func (s *Srv) MkLlb(ctx context.Context) (*llb.Definition, error) {
 		AddEnv("PYTHONUNBUFFERED", "True").
 		File(llb.Mkdir("/app", 0755)).
 		Dir("/app").
-		File(llb.Copy(local, "requirements.txt", ".")).
-		Run(llb.Shlex("pip install --no-cache-dir -r requirements.txt")).Root().
+		File(llb.Copy(local, "requirements.txt", "."))
+
+	if s.push.analysis.NeedsGit {
+		st = st.Run(llb.Shlex(`dash -c "apt update && apt install -y git"`)).Root()
+	}
+
+	st = st.Run(llb.Shlex("pip install --no-cache-dir -r requirements.txt")).Root().
 		File(llb.Copy(local, ".", "."))
 
 	dt, err := st.Marshal(ctx, llb.LinuxAmd64)
