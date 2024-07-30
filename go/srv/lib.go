@@ -302,7 +302,7 @@ func (s *Srv) RunServer(pctx context.Context) error {
 
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", 50051))
 	if err != nil {
-		return terror.Errorf(ctx, "foo")
+		return terror.Errorf(ctx, "listen: %w", err)
 	}
 
 	srv := grpc.NewServer(
