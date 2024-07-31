@@ -80,6 +80,8 @@ message AnalysisResult {
     bool usePythonRequirements = 2;
 
     bool needsGit = 3;
+    bool needsLibGL = 4;
+    bool needsLibGlib = 5;
 }
 
 // Generic streamed reply to actions

@@ -173,12 +173,18 @@ func (s *Srv) Analysis(stream pb.Srv_AnalysisServer) error {
 	defer requirementsFile.Close()
 
 	gitRegex := regexp.MustCompile(`@\s+git`)
+	opencvRegex := regexp.MustCompile(`^\s*opencv-python\b`)
 	lines := bufio.NewScanner(requirementsFile)
 	for lines.Scan() {
 		line := lines.Text()
 
 		if gitRegex.MatchString(line) {
 			s.push.analysis.NeedsGit = true
+		}
+
+		if opencvRegex.MatchString(line) {
+			s.push.analysis.NeedsLibGL = true
+			s.push.analysis.NeedsLibGlib = true
 		}
 	}
 
