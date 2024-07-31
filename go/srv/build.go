@@ -113,8 +113,23 @@ func (s *Srv) MkLlb(ctx context.Context) (*llb.Definition, error) {
 		Dir("/app").
 		File(llb.Copy(local, "requirements.txt", "."))
 
+	aptDeps := []string{}
 	if s.push.analysis.NeedsGit {
-		st = st.Run(llb.Shlex(`dash -c "apt update && apt install -y git"`)).Root()
+		aptDeps = append(aptDeps, "git")
+	}
+
+	if s.push.analysis.NeedsLibGL {
+		aptDeps = append(aptDeps, "libgl1")
+	}
+
+	if s.push.analysis.NeedsLibGlib {
+		aptDeps = append(aptDeps, "libglib2.0-0")
+	}
+
+	if len(aptDeps) > 0 {
+		st = st.Run(
+			llb.Shlexf(`dash -c "apt update && apt install -y %s"`, strings.Join(aptDeps, " ")),
+		).Root()
 	}
 
 	st = st.Run(llb.Shlex("pip install --no-cache-dir -r requirements.txt")).Root().
