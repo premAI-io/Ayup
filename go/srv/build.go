@@ -111,7 +111,7 @@ func (s *Srv) MkLlb(ctx context.Context) (*llb.Definition, error) {
 		AddEnv("PYTHONUNBUFFERED", "True").
 		File(llb.Mkdir("/app", 0755)).
 		Dir("/app").
-		File(llb.Copy(local, "requirements.txt", "."))
+		File(llb.Rm("/etc/apt/apt.conf.d/docker-clean"))
 
 	aptDeps := []string{}
 	if s.push.analysis.NeedsGit {
@@ -127,12 +127,29 @@ func (s *Srv) MkLlb(ctx context.Context) (*llb.Definition, error) {
 	}
 
 	if len(aptDeps) > 0 {
+		aptCachePath := "/var/cache/apt"
+
+		cacheAptMnt := llb.AddMount(
+			aptCachePath,
+			llb.Scratch(),
+			llb.AsPersistentCacheDir(aptCachePath, llb.CacheMountLocked),
+		)
+
 		st = st.Run(
 			llb.Shlexf(`dash -c "apt update && apt install -y %s"`, strings.Join(aptDeps, " ")),
+			cacheAptMnt,
 		).Root()
 	}
 
-	st = st.Run(llb.Shlex("pip install --no-cache-dir -r requirements.txt")).Root().
+	st = st.File(llb.Copy(local, "requirements.txt", "."))
+
+	pipCachePath := "/root/.cache/pip"
+	cachePipMnt := llb.AddMount(
+		pipCachePath,
+		llb.Scratch(),
+		llb.AsPersistentCacheDir(pipCachePath, llb.CacheMountLocked),
+	)
+	st = st.Run(llb.Shlex("pip install -r requirements.txt"), cachePipMnt).Root().
 		File(llb.Copy(local, ".", "."))
 
 	dt, err := st.Marshal(ctx, llb.LinuxAmd64)
