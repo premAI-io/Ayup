@@ -68,11 +68,13 @@ func (s *Srv) Forward(stream pb.Srv_ForwardServer) error {
 			if _, err := conn.Write(req.Data); err != nil {
 				terror.Ackf(ctx, "conn write: %w", err)
 				doneChan <- genericError
-				break
+				return
 			}
 
 			trace.Event(ctx, "ingress write")
 		}
+
+		terror.Ackf(ctx, "conn close: %w", conn.Close())
 	}
 
 	egress := func() {
@@ -80,8 +82,20 @@ func (s *Srv) Forward(stream pb.Srv_ForwardServer) error {
 		for {
 			len, err := conn.Read(buf)
 			if err != nil {
-				terror.Ackf(ctx, "conn read: %w", err)
-				doneChan <- genericError
+				if err != io.EOF {
+					terror.Ackf(ctx, "conn read: %w", err)
+					doneChan <- genericError
+					break
+				}
+
+				if err := stream.Send(&pb.ForwardResponse{
+					Closed: true,
+				}); err != nil {
+					terror.Ackf(ctx, "stream send: %w", err)
+				}
+
+				trace.Event(ctx, "egress done")
+				doneChan <- nil
 				break
 			}
 

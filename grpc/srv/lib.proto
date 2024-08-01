@@ -112,4 +112,6 @@ message ForwardRequest {
 
 message ForwardResponse {
     bytes data = 2;
+
+    bool closed = 3;
 }
