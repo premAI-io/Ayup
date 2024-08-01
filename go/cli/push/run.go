@@ -19,12 +19,12 @@ func (s *Pusher) startPortForwarder(ctx context.Context, wg *sync.WaitGroup) (ne
 	wg.Add(1)
 	defer wg.Done()
 
-	listener, err := net.Listen("tcp", "localhost:5001")
+	listener, err := net.Listen("tcp", "localhost:5000")
 	if err != nil {
 		return nil, terror.Errorf(ctx, "net listen: %w", err)
 	}
 
-	trace.Event(ctx, "TCP proxy listening on 5001")
+	trace.Event(ctx, "TCP proxy listening on 5000")
 
 	egress := func(conn net.Conn, stream pb.Srv_ForwardClient) {
 		buf := make([]byte, 16*1024)
