@@ -37,7 +37,6 @@ func (s *Pusher) startPortForwarder(ctx context.Context, wg *sync.WaitGroup) (ne
 					terror.Ackf(ctx, "conn read: %w", err)
 				}
 
-
 				if err := stream.CloseSend(); err != nil {
 					terror.Ackf(ctx, "stream close send: %w", err)
 				}
