@@ -21,6 +21,12 @@ The initial focus of Ayup is on AI/ML applications which provide some inference 
 
 # State / Roadmap
 
+## YouTube: Demo
+
+[![YouTube: Demo](http://i.ytimg.com/vi/umWNG89BXVE/hqdefault.jpg)](https://www.youtube.com/watch?v=umWNG89BXVE)
+
+## Tasks
+
 Ayup is in the early stages of production. Some of the things that have been done so far are
 
 - [x] Quick source upload
