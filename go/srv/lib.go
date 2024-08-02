@@ -33,7 +33,7 @@ type Srv struct {
 	ImgName    string
 
 	ContainerdAddr string
-	BuildkitdAddr string
+	BuildkitdAddr  string
 
 	// Instance of a push, here while we don't have apps, users, sessions etc.
 	push Push
