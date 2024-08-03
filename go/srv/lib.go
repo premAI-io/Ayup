@@ -32,6 +32,7 @@ type Srv struct {
 	ImgTarPath string
 	ImgName    string
 
+	Host           string
 	ContainerdAddr string
 	BuildkitdAddr  string
 
@@ -300,7 +301,7 @@ func (s *Srv) RunServer(pctx context.Context) error {
 	ctx, span := trace.Span(ctx, "start srv")
 	defer span.End()
 
-	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", 50051))
+	lis, err := net.Listen("tcp", s.Host)
 	if err != nil {
 		return terror.Errorf(ctx, "listen: %w", err)
 	}

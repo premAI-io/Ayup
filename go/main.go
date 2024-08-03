@@ -57,6 +57,7 @@ func (s *PushCmd) Run(g Globals) (err error) {
 }
 
 type DaemonStartCmd struct {
+	Host           string `env:"AYUP_DAEMON_HOST" default:":50051" help:"The addresses and port to listen on"`
 	ContainerdAddr string `env:"AYUP_CONTAINERD_ADDR" help:"The path to the containerd socket if not using Docker's" default:"/var/run/docker/containerd/containerd.sock"`
 	BuildkitdAddr  string `env:"AYUP_BUILDKITD_ADDR" help:"The path to the buildkitd socket if not the default" default:"unix:///run/buildkit/buildkitd.sock"`
 }
@@ -76,6 +77,7 @@ func (s *DaemonStartCmd) Run(g Globals) (err error) {
 			ImgTarPath: filepath.Join(tmp, "image.tar"),
 			ImgName:    "docker.io/richardprem/ayup:test",
 
+			Host:           s.Host,
 			ContainerdAddr: s.ContainerdAddr,
 			BuildkitdAddr:  s.BuildkitdAddr,
 		}
