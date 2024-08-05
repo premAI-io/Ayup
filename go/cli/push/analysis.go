@@ -32,6 +32,7 @@ type AnalysisView struct {
 
 	done   bool
 	result *pb.AnalysisResult
+	err    error
 
 	braceStyle  lipgloss.Style
 	nameStyle   lipgloss.Style
@@ -133,6 +134,7 @@ func (s AnalysisView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			})
 		}
 	case error:
+		s.err = msg
 		return s, tea.Quit
 	case LogMsg:
 		if s.hist.Len() > 0 {
@@ -279,5 +281,11 @@ func (s *Pusher) Analysis(pctx context.Context) (result *pb.AnalysisResult, err 
 		err = nil
 	}
 
-	return model.(AnalysisView).result, err
+	view = model.(AnalysisView)
+
+	if view.err != nil {
+		err = view.err
+	}
+
+	return view.result, err
 }
