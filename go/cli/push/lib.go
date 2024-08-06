@@ -137,9 +137,5 @@ func (s *Pusher) Run(ctx context.Context) error {
 		return err
 	}
 
-	if err := s.Build(ctx); err != nil {
-		return err
-	}
-
 	return s.RunDocker(ctx)
 }
