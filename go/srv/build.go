@@ -1,13 +1,18 @@
 package srv
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"os/exec"
 	"strings"
 
+	"github.com/moby/buildkit/client"
 	"github.com/moby/buildkit/client/llb"
+	gateway "github.com/moby/buildkit/frontend/gateway/client"
+	"github.com/opencontainers/go-digest"
+
+	// gatewayapi "github.com/moby/buildkit/frontend/gateway/pb"
+	"github.com/tonistiigi/fsutil"
 
 	tr "go.opentelemetry.io/otel/trace"
 
@@ -34,8 +39,6 @@ func (s *Srv) Build(stream pb.Srv_BuildServer) (err error) {
 
 	recvChan := mkRecvChan(ctx, stream)
 
-	var buf bytes.Buffer
-
 	if s.push.analysis.UseDockerfile {
 		ctx, span := trace.Span(ctx, "buildctl")
 		defer span.End()
@@ -58,17 +61,109 @@ func (s *Srv) Build(stream pb.Srv_BuildServer) (err error) {
 		return procWait("buildctl", in, out)
 	}
 
-	if err = func() error {
-		ctx, span := trace.Span(ctx, "mkLlb")
+	if err = func() (err error) {
+		ctx, span := trace.Span(ctx, "buildctl")
 		defer span.End()
 
-		dt, err := s.MkLlb(ctx)
+		internalError := mkInternalError(ctx, stream)
+
+		c, err := client.New(ctx, s.BuildkitdAddr)
 		if err != nil {
-			return err
+			return internalError("client new: %w", err)
 		}
 
-		if err := llb.WriteTo(dt, &buf); err != nil {
-			return terror.Errorf(ctx, "llb writeto: %w", err)
+		b := func(ctx context.Context, c gateway.Client) (*gateway.Result, error) {
+			def, err := s.MkLlb(ctx)
+			if err != nil {
+				return nil, internalError("mkllb: %w", err)
+			}
+
+			r, err := c.Solve(ctx, gateway.SolveRequest{
+				Definition: def.ToPB(),
+			})
+			if err != nil {
+				return nil, internalError("client solve: %w", err)
+			}
+
+			return r, nil
+		}
+
+		statusChan := make(chan *client.SolveStatus)
+		sendLog := func(source string, text string) {
+			terror.Ackf(ctx, "send log stream send: %w", stream.Send(&pb.ActReply{
+				Source: source,
+				Variant: &pb.ActReply_Log{
+					Log: text,
+				},
+			}))
+		}
+
+		go func() {
+			verts := make(map[digest.Digest]int)
+
+			for msg := range statusChan {
+				for _, log := range msg.Logs {
+					sendLog("buildkit", fmt.Sprintf("Log: #%d %v %s", log.Stream, log.Timestamp, string(log.Data)))
+				}
+				for _, warn := range msg.Warnings {
+					sendLog("buildkit", fmt.Sprintf("Warning: %v", warn))
+				}
+				for _, vert := range msg.Vertexes {
+					vertNo, ok := verts[vert.Digest]
+					if !ok {
+						vertNo = len(verts) + 1
+						verts[vert.Digest] = vertNo
+					}
+
+					state := "NEW"
+					if vert.Started != nil {
+						state = "START"
+					}
+
+					if vert.Cached {
+						state = "CACHED"
+					} else if vert.Completed != nil {
+						state = "DONE"
+					}
+
+					duration := 0.0
+					if vert.Completed != nil && vert.Started != nil {
+						duration = vert.Completed.Sub(*vert.Started).Seconds()
+					}
+
+					if duration < 0.01 {
+						sendLog("buildkit", fmt.Sprintf("#%d %6s %s", vertNo, state, vert.Name))
+					} else {
+						sendLog("buildkit", fmt.Sprintf("#%d %6s %.2fs %s", vertNo, state, duration, vert.Name))
+					}
+				}
+			}
+		}()
+
+		contextFS, err := fsutil.NewFS(s.SrcDir)
+		if err != nil {
+			return internalError("fsutil newfs: %w", err)
+		}
+
+		_, err = c.Build(ctx, client.SolveOpt{
+			Exports: []client.ExportEntry{
+				{
+					Type: client.ExporterImage,
+					Attrs: map[string]string{
+						"name":        s.ImgName,
+						"push":        "false",
+						"unpack":      "false",
+						"compression": "uncompressed",
+					},
+				},
+			},
+			LocalMounts: map[string]fsutil.FS{
+				"context": contextFS,
+			},
+		}, "ayup", b, statusChan)
+
+		if err != nil {
+			return internalError("client build: %w", err)
 		}
 
 		return nil
@@ -76,30 +171,8 @@ func (s *Srv) Build(stream pb.Srv_BuildServer) (err error) {
 		return
 	}
 
-	if err = func() (err error) {
-		ctx, span := trace.Span(ctx, "buildctl")
-		defer span.End()
-
-		procWait := mkProcWaiter(ctx, stream, recvChan)
-
-		cmd := exec.Command(
-			"buildctl",
-			"--addr", s.BuildkitdAddr,
-			"build",
-			"--output", fmt.Sprintf("type=image,name=%s", s.ImgName),
-			"--local", fmt.Sprintf("context=%s", s.SrcDir),
-		)
-		cmd.Env = filterEnv(cmd)
-
-		in, out := startProc(ctx, cmd)
-
-		in <- procIn{
-			stdio: buf.Bytes(),
-		}
-
-		return procWait("buildctl", in, out)
-	}(); err != nil {
-		return
+	if err := stream.Send(&pb.ActReply{}); err != nil {
+		return terror.Errorf(ctx, "stream send: %w", err)
 	}
 
 	return nil
