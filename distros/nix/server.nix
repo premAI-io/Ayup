@@ -1,8 +1,8 @@
 {
-    lib, stdenv, makeWrapper, version, buildkit, nerdctl, pipreqs, cli
+    lib, stdenv, makeWrapper, version, buildkit, nerdctl, cli
 }:
 let
-    runtimeDeps = [ buildkit nerdctl pipreqs ];
+    runtimeDeps = [ buildkit nerdctl ];
 in
     stdenv.mkDerivation {
         pname = "ayup-server";
