@@ -33,16 +33,16 @@ type ActServer interface {
 	grpc.ServerStream
 }
 
-func (s *Srv) useDockerfile(ctx context.Context, stream pb.Srv_AnalysisServer) error {
+func (s *Srv) useDockerfile(ctx context.Context, stream pb.Srv_AnalysisServer) (bool, error) {
 	internalError := mkInternalError(ctx, stream)
 
 	_, err := os.Stat(filepath.Join(s.SrcDir, "Dockerfile"))
 	if err != nil {
 		if !os.IsNotExist(err) {
-			return internalError("stat Dockerfile: %w", err)
+			return false, internalError("stat Dockerfile: %w", err)
 		}
 
-		return nil
+		return false, nil
 	}
 
 	if err := stream.Send(&pb.ActReply{
@@ -51,14 +51,14 @@ func (s *Srv) useDockerfile(ctx context.Context, stream pb.Srv_AnalysisServer) e
 			Log: "Found Dockerfile, will use it",
 		},
 	}); err != nil {
-		return internalError("stream send: %w", err)
+		return false, internalError("stream send: %w", err)
 	}
 
 	s.push.analysis = &pb.AnalysisResult{
 		UseDockerfile: true,
 	}
 
-	return nil
+	return true, nil
 }
 
 func (s *Srv) Analysis(stream pb.Srv_AnalysisServer) error {
@@ -95,8 +95,29 @@ func (s *Srv) Analysis(stream pb.Srv_AnalysisServer) error {
 
 	requirements_path := filepath.Join(s.SrcDir, "requirements.txt")
 
-	if err := s.useDockerfile(ctx, stream); err != nil {
-		return err
+	if ok, err := s.useDockerfile(ctx, stream); ok || err != nil {
+		if err != nil {
+			return err
+		}
+		ctx, span := trace.Span(ctx, "buildctl")
+		defer span.End()
+
+		procWait := mkProcWaiter(ctx, stream, recvChan)
+
+		cmd := exec.Command(
+			"buildctl",
+			"--addr", s.BuildkitdAddr,
+			"build",
+			"--frontend=dockerfile.v0",
+			"--output", fmt.Sprintf("type=image,name=%s", s.ImgName),
+			"--local", fmt.Sprintf("context=%s", s.SrcDir),
+			"--local", fmt.Sprintf("dockerfile=%s", s.SrcDir),
+		)
+		cmd.Env = filterEnv(cmd)
+
+		in, out := startProc(ctx, cmd)
+
+		return procWait("buildctl", in, out)
 	} else if _, err := os.Stat(requirements_path); err != nil {
 		ctx, span := trace.Span(ctx, "requirements")
 		defer span.End()
@@ -236,28 +257,6 @@ func (s *Srv) Analysis(stream pb.Srv_AnalysisServer) error {
 			s.push.analysis.NeedsLibGL = true
 			s.push.analysis.NeedsLibGlib = true
 		}
-	}
-
-	if s.push.analysis.UseDockerfile {
-		ctx, span := trace.Span(ctx, "buildctl")
-		defer span.End()
-
-		procWait := mkProcWaiter(ctx, stream, recvChan)
-
-		cmd := exec.Command(
-			"buildctl",
-			"--addr", s.BuildkitdAddr,
-			"build",
-			"--frontend=dockerfile.v0",
-			"--output", fmt.Sprintf("type=image,name=%s", s.ImgName),
-			"--local", fmt.Sprintf("context=%s", s.SrcDir),
-			"--local", fmt.Sprintf("dockerfile=%s", s.SrcDir),
-		)
-		cmd.Env = filterEnv(cmd)
-
-		in, out := startProc(ctx, cmd)
-
-		return procWait("buildctl", in, out)
 	}
 
 	if err = func() (err error) {
