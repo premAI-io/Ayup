@@ -170,8 +170,8 @@ func (s *Srv) Analysis(stream pb.Srv_AnalysisServer) error {
 		span.AddEvent("Creating requirements.txt")
 
 		local := llb.Local("context", llb.ExcludePatterns([]string{".git"}))
-		st := pythonSlimLlb().File(llb.Copy(local, ".", "."))
-		st = pythonSlimPip(st, "install pipreqs").
+		st := pythonSlimPip(pythonSlimLlb(), "install pipreqs").
+			File(llb.Copy(local, ".", ".")).
 			Run(llb.Shlex("pipreqs")).Root()
 
 		dt, err := st.Marshal(ctx, llb.LinuxAmd64)
@@ -449,12 +449,23 @@ func buildkitStatusSender(ctx context.Context, stream pb.Srv_AnalysisServer) cha
 					sendLog("buildkit", fmt.Sprintf("#%d %6s %.2fs %s", vertNo, state, duration, vert.Name))
 				}
 			}
+
+			var prevLog *client.VertexLog
 			for _, log := range msg.Logs {
 				vertNo, ok := verts[log.Vertex]
 				if !ok {
 					vertNo = -1
 				}
-				sendLog("buildkit", fmt.Sprintf("#%d %6s %s", vertNo, "LOG", string(log.Data)))
+
+				if prevLog != nil && prevLog.Vertex == log.Vertex && prevLog.Timestamp == log.Timestamp {
+					continue
+				}
+				prevLog = log
+
+				text := strings.Trim(string(log.Data), "\r\n")
+				for _, line := range strings.Split(text, "\n") {
+					sendLog("buildkit", fmt.Sprintf("#%d %6s %s", vertNo, "LOG", line))
+				}
 			}
 
 		}
