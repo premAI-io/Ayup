@@ -1,6 +1,5 @@
 {
-    buildGoModule, version, callPackage, golangci-lint,
-    # lib
+    buildGoModule, version, callPackage, golangci-lint, vendorHash
 }:
 let
     srcWithProtobuf = callPackage ./src.nix { inherit version; };
@@ -12,7 +11,7 @@ buildGoModule {
   src = srcWithProtobuf;
   modRoot = "./go";
   # Use lib.fakeHash when updating deps
-  vendorHash = "sha256-3hTfXDmIGh9HFUa/5LKheknw3ZP/80NATINDZvbizEE="; # lib.fakeHash;
+  inherit vendorHash;
   proxyVendor = true; # Avoids workspace mode error
   postInstall = ''
     mv $out/bin/go $out/bin/ay

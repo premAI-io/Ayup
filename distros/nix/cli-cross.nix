@@ -1,6 +1,5 @@
 {
-    buildGoModule, version, callPackage,
-    # lib,
+    buildGoModule, version, callPackage, vendorHash,
     GOOS ? "linux",
     GOARCH ? "amd64",
 }:
@@ -17,7 +16,7 @@ in
   src = srcWithProtobuf;
   modRoot = "./go";
   # Use lib.fakeHash when updating deps
-  vendorHash = "sha256-3hTfXDmIGh9HFUa/5LKheknw3ZP/80NATINDZvbizEE="; # lib.fakeHash;
+  inherit vendorHash;
   # Avoids workspace mode error
   proxyVendor = true;
   postInstall = ''

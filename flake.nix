@@ -33,24 +33,27 @@
           inherit version;
           dontPatchShebangs = true;
       };
-      cli = pkgs.callPackage ./distros/nix/cli.nix { inherit version; };
+      vendorHash = "sha256-gXPZiytWwDEkjlNxWCuwEew8s53Hn6aTlBSYs1KoNdo=";
+      cli = pkgs.callPackage ./distros/nix/cli.nix {
+        inherit version vendorHash;
+      };
       cli-darwin-arm64 = pkgs.callPackage ./distros/nix/cli-cross.nix {
-        inherit version;
+        inherit version vendorHash;
         GOOS = "darwin";
         GOARCH = "arm64";
       };
       cli-darwin-amd64 = pkgs.callPackage ./distros/nix/cli-cross.nix {
-        inherit version;
+        inherit version vendorHash;
         GOOS = "darwin";
         GOARCH = "amd64";
       };
       cli-linux-arm64 = pkgs.callPackage ./distros/nix/cli-cross.nix {
-        inherit version;
+        inherit version vendorHash;
         GOOS = "linux";
         GOARCH = "arm64";
       };
       cli-linux-amd64 = pkgs.callPackage ./distros/nix/cli-cross.nix {
-        inherit version;
+        inherit version vendorHash;
         GOOS = "linux";
         GOARCH = "amd64";
       };
