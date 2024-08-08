@@ -8,6 +8,10 @@ app = Flask(__name__)
 tokenizer = AutoTokenizer.from_pretrained("mrm8488/distilroberta-finetuned-financial-news-sentiment-analysis")
 model = AutoModelForSequenceClassification.from_pretrained("mrm8488/distilroberta-finetuned-financial-news-sentiment-analysis")
 
+@app.route('/')
+def help():
+    return """Do something like: curl -X POST http://localhost:5000/classify -H "Content-Type: application/json" -d '{"text": "The SPX circuit breaker was triggered."}'"""
+
 @app.route('/classify', methods=['POST'])
 def classify_text():
     data = request.json
