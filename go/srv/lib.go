@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"net"
 	"os"
 	"os/exec"
 	"sync"
@@ -13,6 +12,7 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 	pb "premai.io/Ayup/go/internal/grpc/srv"
+	"premai.io/Ayup/go/internal/rpc"
 	"premai.io/Ayup/go/internal/terror"
 	"premai.io/Ayup/go/internal/trace"
 
@@ -301,7 +301,7 @@ func (s *Srv) RunServer(pctx context.Context) error {
 	ctx, span := trace.Span(ctx, "start srv")
 	defer span.End()
 
-	lis, err := net.Listen("tcp", s.Host)
+	lis, err := rpc.Listen(ctx, s.Host)
 	if err != nil {
 		return terror.Errorf(ctx, "listen: %w", err)
 	}
