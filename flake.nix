@@ -33,7 +33,7 @@
           inherit version;
           dontPatchShebangs = true;
       };
-      vendorHash = "sha256-gXPZiytWwDEkjlNxWCuwEew8s53Hn6aTlBSYs1KoNdo=";
+      vendorHash = "sha256-T+I3CXBWzW7f9mpGN071VTcsPhBXHy5d9CkTj7EX9Uw="; #pkgs.lib.fakeHash;
       cli = pkgs.callPackage ./distros/nix/cli.nix {
         inherit version vendorHash;
       };

@@ -71,6 +71,14 @@ func (s *Srv) Analysis(stream pb.Srv_AnalysisServer) error {
 
 	recvChan := mkRecvChan(ctx, stream)
 
+	if ok, err := s.checkPeerAuth(ctx); !ok || err != nil {
+		if err != nil {
+			return internalError("checkPeerAuth: %w", err)
+		}
+
+		return sendError("Not authorized")
+	}
+
 	c, err := client.New(ctx, s.BuildkitdAddr)
 	if err != nil {
 		return internalError("client new: %w", err)

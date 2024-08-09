@@ -5,17 +5,24 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"net"
 	"os"
 	"os/exec"
 	"sync"
 
-	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
+	"github.com/charmbracelet/lipgloss"
+
+	gostream "github.com/libp2p/go-libp2p-gostream"
+	p2pPeer "github.com/libp2p/go-libp2p/core/peer"
+
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/peer"
+
 	pb "premai.io/Ayup/go/internal/grpc/srv"
+	"premai.io/Ayup/go/internal/rpc"
 	"premai.io/Ayup/go/internal/terror"
 	"premai.io/Ayup/go/internal/trace"
 
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	attr "go.opentelemetry.io/otel/attribute"
 	tr "go.opentelemetry.io/otel/trace"
 )
@@ -32,12 +39,17 @@ type Srv struct {
 	ImgTarPath string
 	ImgName    string
 
-	Host           string
+	Host             string
+	P2pPrivKey       string
+	P2pAuthedClients []p2pPeer.ID
+
 	ContainerdAddr string
 	BuildkitdAddr  string
 
 	// Instance of a push, here while we don't have apps, users, sessions etc.
 	push Push
+
+	tuiMutex sync.Mutex
 }
 
 func newErrorReply(error string) *pb.ActReply {
@@ -288,22 +300,90 @@ func mkProcWaiter(ctx context.Context, stream ActServer, recvChan chan recvReq) 
 	}
 }
 
-func (s *Srv) Login(ctx context.Context, in *pb.Credentials) (*pb.Authentication, error) {
-	return &pb.Authentication{
-		Result: &pb.Authentication_Token{
-			Token: "foo",
-		},
-	}, nil
+func remotePeerId(ctx context.Context) (peerId p2pPeer.ID, err error) {
+	pr, ok := peer.FromContext(ctx)
+	if !ok {
+		return peerId, fmt.Errorf("failed to get peer info from context")
+	}
+
+	peerIdStr := pr.Addr.String()
+	peerId, err = p2pPeer.Decode(peerIdStr)
+	if err != nil {
+		return peerId, terror.Errorf(ctx, "peer Decode: %w", err)
+	}
+
+	return
 }
 
-func (s *Srv) RunServer(pctx context.Context) error {
+func (s *Srv) checkPeerAuth(ctx context.Context) (bool, error) {
+	span := tr.SpanFromContext(ctx)
+
+	pr, ok := peer.FromContext(ctx)
+	if !ok {
+		return false, fmt.Errorf("failed to get peer info from context")
+	}
+
+	if pr.Addr.Network() != gostream.Network {
+		trace.Event(ctx, "Authorized due to insecure transport")
+
+		return true, nil
+	}
+
+	peerIdStr := pr.Addr.String()
+	span.SetAttributes(attr.String("peerId", peerIdStr))
+
+	peerId, err := p2pPeer.Decode(peerIdStr)
+	if err != nil {
+		return false, terror.Errorf(ctx, "peer Decode: %w", err)
+	}
+
+	for _, authedId := range s.P2pAuthedClients {
+		if peerId == authedId {
+			trace.Event(ctx, "Authorized due to ID match")
+			return true, nil
+		} else {
+			trace.Event(ctx, "No match", attr.String("authedId", authedId.String()))
+		}
+	}
+
+	trace.Event(ctx, "No authorized peer IDs match")
+
+	return false, nil
+}
+
+func (s *Srv) RunServer(pctx context.Context) (err error) {
 	ctx := trace.SetSpanKind(pctx, tr.SpanKindServer)
 	ctx, span := trace.Span(ctx, "start srv")
 	defer span.End()
 
-	lis, err := net.Listen("tcp", s.Host)
+	privKey, err := rpc.EnsurePrivKey(ctx, s.P2pPrivKey)
+	if err != nil {
+		return err
+	}
+
+	titleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("098")).Bold(true)
+	if err != nil {
+		return terror.Errorf(ctx, "peer IDFromPublicKey: %w", err)
+	}
+
+	lis, host, err := rpc.Listen(ctx, s.Host, privKey)
 	if err != nil {
 		return terror.Errorf(ctx, "listen: %w", err)
+	}
+
+	if host != nil {
+		for _, maddr := range host.Addrs() {
+			peerMaddr := fmt.Sprintf("%s/p2p/%s", maddr.String(), host.ID().String())
+			fmt.Println(titleStyle.Render("Connect with:"), fmt.Sprintf("ay login %s", peerMaddr))
+		}
+
+		if len(s.P2pAuthedClients) > 0 {
+			fmt.Println()
+			fmt.Println(titleStyle.Render("Authorized clients:"))
+			for _, clientPeerId := range s.P2pAuthedClients {
+				fmt.Println("\t", clientPeerId)
+			}
+		}
 	}
 
 	srv := grpc.NewServer(

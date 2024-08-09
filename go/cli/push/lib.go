@@ -18,8 +18,9 @@ import (
 type Pusher struct {
 	Tracer tr.Tracer
 
-	Host   string
-	Client pb.SrvClient
+	Host       string
+	P2pPrivKey string
+	Client     pb.SrvClient
 
 	SrcDir string
 }
@@ -122,7 +123,12 @@ func (s *Pusher) Run(ctx context.Context) error {
 	ctx, span := trace.Span(ctx, "push")
 	defer span.End()
 
-	client, err := rpc.Client(ctx, s.Host)
+	privKey, err := rpc.EnsurePrivKey(ctx, s.P2pPrivKey)
+	if err != nil {
+		return err
+	}
+
+	client, err := rpc.Client(ctx, s.Host, privKey)
 	if err != nil {
 		return err
 	}

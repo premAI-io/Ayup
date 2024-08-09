@@ -42,6 +42,14 @@ func (s *Srv) Sync(stream pb.Srv_SyncServer) error {
 		return sendErrorClose("internal error")
 	}
 
+	if ok, err := s.checkPeerAuth(ctx); !ok || err != nil {
+		if err != nil {
+			return internalError("checkPeerAuth: %w", err)
+		}
+
+		return sendErrorClose("Not authorized")
+	}
+
 	if _, err := os.Stat(s.SrcDir); err == nil {
 		if err := os.RemoveAll(s.SrcDir); err != nil {
 			return internalError("RemoveAll: %w", err)
