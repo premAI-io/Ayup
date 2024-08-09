@@ -11,7 +11,7 @@ service Srv {
     rpc Analysis(stream ActReq) returns (stream ActReply);
     rpc Build(stream ActReq) returns (stream ActReply);
     rpc Run(stream ActReq) returns (stream ActReply);
-    rpc Login(Credentials) returns (Authentication);
+    rpc Login(LoginReq) returns (LoginReply);
     rpc Forward(stream ForwardRequest) returns (stream ForwardResponse);
 }
 
@@ -35,15 +35,11 @@ message Result {
     optional Error error = 1;
 }
 
-message Credentials {
-    string password = 1;
+message LoginReq {
 }
 
-message Authentication {
-    oneof result {
-        Error error = 1;
-        string token = 2;
-    }
+message LoginReply {
+    optional Error error = 1;
 }
 
 message ChoiceBool {

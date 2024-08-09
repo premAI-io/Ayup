@@ -3,41 +3,52 @@ package login
 import (
 	"context"
 	"fmt"
-	"time"
 
+	"github.com/libp2p/go-libp2p/core/peer"
 	pb "premai.io/Ayup/go/internal/grpc/srv"
 	"premai.io/Ayup/go/internal/rpc"
 	"premai.io/Ayup/go/internal/terror"
 	"premai.io/Ayup/go/internal/trace"
+	"premai.io/Ayup/go/internal/tui"
 )
 
 type Login struct {
-	Host string
+	Host       string
+	P2pPrivKey string
 }
 
 func (s *Login) Run(pctx context.Context) error {
 	ctx, span := trace.Span(pctx, "login")
 	defer span.End()
 
-	c, err := rpc.Client(ctx, s.Host)
+	privKey, err := rpc.EnsurePrivKey(ctx, s.P2pPrivKey)
 	if err != nil {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, time.Second)
-	defer cancel()
+	c, err := rpc.Client(ctx, s.Host, privKey)
+	if err != nil {
+		return err
+	}
 
-	res, err := c.Login(ctx, &pb.Credentials{Password: "bar"})
+	peerId, err := peer.IDFromPrivateKey(privKey)
+	if err != nil {
+		return terror.Errorf(ctx, "peer IDFromPrivateKey: %w", err)
+	}
+
+	fmt.Println(tui.TitleStyle.Render("Peer ID:"), peerId)
+	fmt.Println(tui.TitleStyle.Render("Sending login request;"), "use the server console to confirm the request from this peer ID")
+
+	res, err := c.Login(ctx, &pb.LoginReq{})
 	if err != nil {
 		return terror.Errorf(ctx, "grpc login: %w", err)
 	}
 
-	switch r := res.Result.(type) {
-	case *pb.Authentication_Error:
-		return terror.Errorf(ctx, "login error: %s", r.Error)
-	case *pb.Authentication_Token:
-		fmt.Println("Got authentication token", r.Token)
+	if res.GetError() != nil {
+		return fmt.Errorf("remote error: %s", res.GetError().Error)
 	}
+
+	fmt.Println(tui.TitleStyle.Render("Authorized!"), "The server will now accept requests from this client.")
 
 	return nil
 }
