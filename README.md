@@ -43,6 +43,8 @@ In the pipeline (in no particular order)
 - [ ] Pluggable analysis/build/run step(s)
 - [ ] Secure server login and connection
 - [ ] Bundle rootless Containerd, Buildkit, Nerdctl with the server
+- [ ] Watch mode for build and deploy on save
+- [ ] Deploy itself in daemon mode
 
 # Install
 
@@ -89,6 +91,27 @@ command line option, see `ay daemon start --help`.
 Installing Docker or Kubernetes will provide a Containerd instance. It's socket will be somewhere
 like `/run/containerd/containerd.sock`, `/run/docker/containerd/containerd.sock` or
 `/run/k3s/containerd/containerd.sock`.
+
+## Examples
+
+There is an [examples directory](https://github.com/premAI-io/Ayup/tree/main/examples) that contains
+some applications that are known to work with Ayup.
+
+For example you can do
+
+```sh
+$ cd $AYUP_SRC/examples/hello-world-flask
+$ ay push
+```
+
+You can also run it on its self
+
+```sh
+$ cd $AYUP_SRC
+$ ay push
+```
+
+Presently it just produces the help output.
 
 # Development
 
