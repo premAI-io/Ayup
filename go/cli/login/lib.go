@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/libp2p/go-libp2p/core/peer"
+	"premai.io/Ayup/go/internal/conf"
 	pb "premai.io/Ayup/go/internal/grpc/srv"
 	"premai.io/Ayup/go/internal/rpc"
 	"premai.io/Ayup/go/internal/terror"
@@ -49,6 +50,10 @@ func (s *Login) Run(pctx context.Context) error {
 	}
 
 	fmt.Println(tui.TitleStyle.Render("Authorized!"), "The server will now accept requests from this client.")
+
+	if err := conf.Set(ctx, "AYUP_PUSH_HOST", s.Host); err == nil {
+		fmt.Println("Setting this server as the push default, you can override it with", tui.TitleStyle.Render("AYUP_PUSH_HOST"))
+	}
 
 	return nil
 }
