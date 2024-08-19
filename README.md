@@ -1,11 +1,11 @@
 # Vision
 
-Ayup will figure out how to build, run and serve some AI/ML inference code you provide on a remote
-(or local) computer. It saves you time when dealing with unfamiliar code and makes using a remote
-machine for building and executing code easy.
+Ayup will provide the framework necessary to analyse, modify, build, test, deploy and monitor code
+on a remote machine easily. It will allow creating a tight feedback loop that incorporates code
+analysis, GenAI and user feedback all on infrastructure of your choosing. 
 
-Ayup avoids relying on you to read documentation and write configuration files. Instead it tries to
-solve problems with you interactively.
+It will be an all-in-one interactive CI/CD tool that is itself easy to deploy and use. It will allow
+workflows that require user interaction and feedback from deployment.
 
 ![ayup-push-1](https://github.com/user-attachments/assets/9b7c5ff9-e2a3-4a90-a0d8-4262c78dc6d5)
 
@@ -16,8 +16,6 @@ host the Ayup server.
 Web applications have their ports forwarded to the client. Allowing them to be accessed as if they
 were running locally. Applications can also be served on a sub-domain of the server via the builtin
 proxy.
-
-The initial focus of Ayup is on AI/ML applications which provide some inference service.
 
 # State / Roadmap
 
@@ -35,13 +33,13 @@ Ayup is in the early stages of production. Some of the things that have been don
 - [x] Containerd support (allows instant loading of containers and future k8s support)
 - [x] Subdomain routing
 - [x] Build and run applications with a Dockerfile
+- [x] Secure server login and connection
 
 In the pipeline (in no particular order)
 
 - [ ] Detect appropriate ports to forward
 - [ ] Multiple simultaneous applications
 - [ ] Pluggable analysis/build/run step(s)
-- [ ] Secure server login and connection
 - [ ] Bundle rootless Containerd, Buildkit, Nerdctl with the server
 - [ ] Watch mode for build and deploy on save
 - [ ] Deploy itself in daemon mode
@@ -62,35 +60,93 @@ are a pain. Eventually we'll magic these away, but in the mean time see the Deve
 
 # Running
 
-## Client
+## Config
 
-Enter the directory where the source of the project you wish to run is and do
+All of Ayup's configuration is done via environment variables or command line switches. However you
+can also set environment variables in `~/.config/ayup/env` which is in the usual 
+[dotenv format](https://github.com/joho/godotenv).
 
-```sh
-$ ay push
-```
+Settings you choose interactively will be persisted to the env file if possible. Command line switches and
+environment variables take precedence over the env file.
 
-For now this will stupidly try to connect to localhost. Until we create a secure login process
-you will need to set the remote address (see `ay --help`)
+You can see all available config using the `--help` switch e.g. `ay push --help`, `ay daemon start
+--help`
 
 ## Server
 
-The server can be run as root with
+Presently the server has three prerequisites: Containerd, Buildkitd and Nerdctl. We plan to bundle
+or eliminate them, but for now you need to install them or use Nix as described in the
+development section.
+
+### Containerd
+
+This component is common and used by both Docker and Kubernetes. It needs to be running on your
+system and you need to specify it's address with `AYUP_CONTAINERD_ADDR`. Places you can find it are: 
+`/run/containerd/containerd.sock`, `/run/docker/containerd/containerd.sock` or
+`/run/k3s/containerd/containerd.sock`.
+
+### Buildkitd
+
+This is also used by Docker, but the buildkit daemon may not be running or may be configured with
+the wrong settings. The easiest way to run it with the right configuration is using Nix as described
+in the development section.
+
+It could also be started with  `buildkitd --oci-worker false --containerd-worker-addr $AYUP_CONTAINERD_ADDR`
+
+It's socket address can be configured with `AYUP_BUILDKITD_ADDR` if it's different from
+`unix:///run/buildkit/buildkitd.sock`.
+
+### Nerdctl
+
+This simply needs to be installed on your system. If your package manager does not have it, then Nix
+can be used to get it as described in the development section.
+
+### Start
+
+To start Ayup listening for local connections do
 
 ```sh
 $ ay daemon start
 ```
 
-This requires a Buildkitd instance to be running and pointed at a Containerd worker. This is not
-such a common thing, so see the development section for now which has details on using Nix to get
-them. Eventually we will bundle these up.
+To run it securely on a remote computer listening on all addresses do
 
-Often you will need to set the Containerd address which can be done with an environment var or
-command line option, see `ay daemon start --help`.
+```sh
+$ ay daemon start --host=/ip4/0.0.0.0/tcp/50051
+```
 
-Installing Docker or Kubernetes will provide a Containerd instance. It's socket will be somewhere
-like `/run/containerd/containerd.sock`, `/run/docker/containerd/containerd.sock` or
-`/run/k3s/containerd/containerd.sock`.
+This sets the listen address to a libp2p multiaddress, when Ayup sees this it will only allow
+encrypted connections using libp2p.
+
+Ayup will print details on how to login to the server from a client. This requires shell access to
+the Ayup server so that you can interactively authorize the client.
+
+Clients can also be pre-authorized by adding their peer IDs to `AYUP_P2P_AUTHORIZED_CLIENTS`
+
+## Client
+
+If the Ayup server is running locally, then all you need to do is change to a source code directory
+and run `ay push`
+
+Otherwise you first need to login. The server prints the login command you need to use, it will look
+something like:
+
+```
+$ ay login /ip4/192.168.0.1/tcp/50051/p2p/1...
+```
+
+If you need to get the clients peer ID to pre-authorize it then just run login with a nonsense
+address
+
+```
+$ ay login foo
+```
+
+Login always prints the client's peer ID. 
+
+The login command will set `AYUP_PUSH_HOST` in `~/.config/ayup/env` to the address we used to login
+to. So that `ay push` will use it by default. You can override it in the environment or by using
+`--host`.
 
 ## Examples
 
@@ -115,7 +171,7 @@ Presently it just produces the help output.
 
 # Development
 
-Ayup is a standard Go project and thus easy to build in most enviroments. However Nix
+Ayup is a standard Go project and thus easy to build in most environments. However Nix
 is used to provide the reference development and build environment.
 
 1. Install Nix with flakes/"experimental" features enabled (e.g. use https://github.com/DeterminateSystems/nix-installer)
@@ -176,3 +232,13 @@ And the environment var
 ```sh
 PYROSCOPE_ADHOC_SERVER_ADDRESS=http://localhost:4040 ay ...
 ```
+
+# Follow
+
+If you are interested in following Ayup's development then see [the discussions dev log](https://github.com/premAI-io/Ayup/discussions/categories/announcements)
+or find me (Richard Palethorpe) on social media.
+
+# Contact
+
+The main point of contact for this project is Richard Palethorpe, richard@premai.io. You can use the discussions, 
+e-mail or find me elsewhere with questions, suggestions or feedback.
