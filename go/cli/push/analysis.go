@@ -74,7 +74,7 @@ func (s AnalysisView) recvMsgCmd() tea.Cmd {
 		}
 
 		if res.GetError() != nil {
-			return terror.Errorf(s.ctx, res.GetError().Error)
+			return terror.Errorf(s.ctx, "%s", res.GetError().Error)
 		}
 
 		log := res.GetLog()

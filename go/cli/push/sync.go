@@ -46,7 +46,7 @@ func (s *Pusher) Sync(pctx context.Context) (err error) {
 			if res == nil {
 				err2 = terror.Errorf(ctx, "stream close and recv: no response")
 			} else if res.Error != nil {
-				err = terror.Errorf(ctx, res.Error.Error)
+				err = terror.Errorf(ctx, "%s", res.Error.Error)
 			}
 		} else {
 			err2 = terror.Errorf(ctx, "stream close and recv: %w", err2)
