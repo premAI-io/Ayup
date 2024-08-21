@@ -2,217 +2,87 @@ package push
 
 import (
 	"context"
-	"fmt"
 	"io"
-	"io/fs"
-	"os"
-	"strings"
 	"sync"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"golang.org/x/sync/errgroup"
 	pb "premai.io/Ayup/go/internal/grpc/srv"
+	"premai.io/Ayup/go/internal/rpc"
 	"premai.io/Ayup/go/internal/trace"
 
-	"go.opentelemetry.io/otel/attribute"
-	tr "go.opentelemetry.io/otel/trace"
 	"premai.io/Ayup/go/internal/terror"
 )
 
-type syncCtx struct {
-	stream      pb.Srv_SyncClient
-	cancelChan  chan struct{}
-	logViewProg *tea.Program
-}
-
-func (s syncCtx) syncDir(ctx context.Context, source pb.Source, path string) (err error) {
-	ctx, span := trace.Span(ctx, "sync dir", attribute.String("path", path))
+func (s *Pusher) Download(ctx context.Context) error {
+	ctx, span := trace.Span(ctx, "download")
 	defer span.End()
 
-	buf := make([]byte, 16*1024)
-	chunks := make([]*pb.FileChunk, 0, 32)
-	// not including overhead, remember the 4MB grpc limit if playing with the envelope size
-	length := 0
+	stream, err := s.Client.Download(ctx, &pb.DownloadReq{})
+	if err != nil {
+		return terror.Errorf(ctx, "client Download: %w", err)
+	}
+	defer terror.Ackf(ctx, "stream CloseSend: %w", stream.CloseSend())
 
-	sendFileChunks := func() error {
-		if len(chunks) < 1 {
-			return nil
-		}
-
-		select {
-		case <-s.cancelChan:
-			if err := s.stream.Send(&pb.FileChunks{
-				Cancel: true,
-			}); err != nil {
-				return terror.Errorf(ctx, "stream send: %w", err)
-			}
-
-			return terror.Errorf(ctx, "User cancelled")
-		default:
-		}
-
-		if err := s.stream.Send(&pb.FileChunks{
-			Chunk: chunks,
-		}); err != nil {
-			return terror.Errorf(ctx, "stream send: %w", err)
-		}
-
-		length = 0
-		chunks = make([]*pb.FileChunk, 0, 32)
-
-		return nil
+	retError := func(msg string, args ...any) error {
+		return terror.Errorf(ctx, msg, args...)
 	}
 
-	sendFile := func(path string, r fs.File) error {
-		offset := 0
+	ctx, cancelFunc := context.WithCancel(ctx)
 
-		for {
-			if length > 15*1024 || len(chunks) >= 512 {
-				if err := sendFileChunks(); err != nil {
-					return err
-				}
-			}
+	logChan := make(chan string)
+	cancelChan := make(chan struct{})
+	fileRecver := rpc.NewFileRecver(stream, logChan, retError, retError, s.SrcDir, s.AssistantDir)
+	logViewProg := tea.NewProgram(NewLogView("sync", cancelChan))
 
-			last := false
-			chunkLength := 0
+	var g errgroup.Group
 
-			for {
-				data := buf[length+chunkLength:]
-				c, err := r.Read(data)
-
-				if c < 0 {
-					return terror.Errorf(ctx, "file read: bytes written is negative: %d", c)
-				}
-
-				if err != nil {
-					if err == io.EOF {
-						last = true
-					} else {
-						return terror.Errorf(ctx, "file read: %w", err)
-					}
-				}
-
-				chunkLength += c
-
-				if last || chunkLength+length > 15*1024 {
-					break
-				}
-			}
-
-			chunks = append(chunks, &pb.FileChunk{
-				Source: source,
-				Path:   path,
-				Last:   last,
-				Data:   buf[length : length+chunkLength],
-				Offset: int64(offset),
-			})
-
-			length += chunkLength
-			offset += chunkLength
-
-			if last {
-				break
-			}
+	g.Go(func() error {
+		if _, err := logViewProg.Run(); err != nil {
+			cancelFunc()
+			return terror.Errorf(ctx, "logViewProg Run: %w", err)
 		}
-
 		return nil
-	}
-
-	dfs := os.DirFS(path)
-
-	err = fs.WalkDir(dfs, ".", func(path string, d fs.DirEntry, err error) error {
-
-		event_attrs := []attribute.KeyValue{
-			attribute.String("path", path),
-			attribute.Bool("isDir", d.IsDir()),
-			attribute.Bool("IsRegular", d.Type().IsRegular()),
-		}
-		if err != nil {
-			return terror.Errorf(ctx, "walkdir func: %w", err)
-		}
-
-		info, err := d.Info()
-		if err != nil {
-			return terror.Errorf(ctx, "dir info: %w", err)
-		}
-
-		event_attrs = append(event_attrs,
-			attribute.String("mode", info.Mode().String()),
-			attribute.Int64("size", info.Size()),
-		)
-
-		skipNotice := func(kind string) {
-			span.AddEvent("skip", tr.WithAttributes(event_attrs...))
-			s.logViewProg.Send(LogMsg{
-				source: "ayup",
-				body:   fmt.Sprintf("Skip %s: %s", kind, path),
-			})
-		}
-
-		if strings.HasPrefix(d.Name(), ".") && d.Name() != "." {
-			skipNotice("hidden")
-
-			if d.IsDir() {
-				return fs.SkipDir
-			}
-			return nil
-		}
-
-		if !d.Type().IsRegular() {
-			skipNotice("special file")
-
-			return nil
-		}
-
-		// TODO: We should probably transmit empty directories
-		if d.IsDir() {
-			span.AddEvent("skip", tr.WithAttributes(event_attrs...))
-			return nil
-		}
-
-		span.AddEvent("copy", tr.WithAttributes(event_attrs...))
-
-		size := info.Size()
-		unit := "b"
-		if size > 1000 {
-			unit = "Kb"
-			size /= 1000
-		}
-		s.logViewProg.Send(LogMsg{
-			source: "ayup",
-			body:   fmt.Sprintf("Send %d%s: %s", size, unit, path),
-		})
-		r, err := dfs.Open(path)
-		if err != nil {
-			return terror.Errorf(ctx, "open read: %w", err)
-		}
-		defer r.Close()
-
-		return sendFile(path, r)
 	})
 
-	if err = sendFileChunks(); err != nil {
-		return
-	}
+	g.Go(func() error {
+		for {
+			select {
+			case log, ok := <-logChan:
+				if !ok {
+					return nil
+				}
+				logViewProg.Send(LogMsg{
+					source: "ayup",
+					body:   log,
+				})
+			case <-cancelChan:
+				cancelFunc()
+				return nil
+			}
+		}
+	})
 
-	return
+	g.Go(func() error {
+		err := fileRecver.RecvDirs(ctx)
+		logViewProg.Send(DoneMsg{})
+		close(logChan)
+		if err != nil {
+			cancelFunc()
+		}
+		return err
+	})
+
+	return g.Wait()
 }
 
-func (s *Pusher) Sync(pctx context.Context) (err error) {
-	ctx, span := trace.Span(pctx, "sync")
+func (s *Pusher) Upload(pctx context.Context) (err error) {
+	ctx, span := trace.Span(pctx, "upload")
 	defer span.End()
 
-	var src string
+	src := s.SrcDir
 
-	if s.SrcDir == "" {
-		src, err = os.Getwd()
-		if err != nil {
-			return terror.Errorf(ctx, "getwd: %w", err)
-		}
-	} else {
-		src = s.SrcDir
-	}
-
-	stream, err := s.Client.Sync(ctx)
+	stream, err := s.Client.Upload(ctx)
 	if err != nil {
 		return terror.Errorf(ctx, "sync stream: %w", err)
 	}
@@ -252,13 +122,28 @@ func (s *Pusher) Sync(pctx context.Context) (err error) {
 		}
 	}()
 
-	sc := syncCtx{
-		stream:      stream,
-		cancelChan:  cancelChan,
-		logViewProg: logViewProg,
+	logChan := make(chan string)
+	defer close(logChan)
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		for log := range logChan {
+			logViewProg.Send(LogMsg{
+				source: "ayup",
+				body:   log,
+			})
+		}
+	}()
+
+	retError := func(msg string, args ...any) error {
+		return terror.Errorf(ctx, msg, args...)
 	}
 
-	if err := sc.syncDir(ctx, pb.Source_app, src); err != nil {
+	sender := rpc.NewFileSender(stream, cancelChan, logChan, retError, retError)
+
+	if err := sender.SendDir(ctx, pb.Source_app, src); err != nil {
 		return err
 	}
 
@@ -266,7 +151,5 @@ func (s *Pusher) Sync(pctx context.Context) (err error) {
 		return
 	}
 
-	err = sc.syncDir(ctx, pb.Source_assistant, s.AssistantDir)
-
-	return
+	return sender.SendDir(ctx, pb.Source_assistant, s.AssistantDir)
 }

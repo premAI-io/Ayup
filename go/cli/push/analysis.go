@@ -1,6 +1,7 @@
 package push
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -24,11 +25,13 @@ import (
 type AnalysisView struct {
 	ctx    context.Context
 	span   tr.Span
-	hist   *strings.Builder
 	stream pb.Srv_AnalysisClient
 
-	choice  *huh.Form
-	spinner spinner.Model
+	choice       *huh.Form
+	spinner      spinner.Model
+	hist         *strings.Builder
+	histContLine bool
+	histPrevSrc  string
 
 	done   bool
 	result *pb.AnalysisResult
@@ -62,9 +65,8 @@ func NewAnalysisView(ctx context.Context, stream pb.Srv_AnalysisClient) Analysis
 
 func (s AnalysisView) recvMsgCmd() tea.Cmd {
 	return func() tea.Msg {
-		s.span.AddEvent("waiting for recv")
 		res, err := s.stream.Recv()
-		s.span.AddEvent("got recv")
+
 		if err != nil {
 			if err == io.EOF {
 				return func() DoneMsg { return DoneMsg{} }
@@ -73,6 +75,7 @@ func (s AnalysisView) recvMsgCmd() tea.Cmd {
 		}
 
 		if res.Variant == nil {
+			trace.Event(s.ctx, "recv nil done")
 			// TODO: sent by proc watcher for success, not needed for analysis anymore
 			return DoneMsg{}
 		}
@@ -91,6 +94,7 @@ func (s AnalysisView) recvMsgCmd() tea.Cmd {
 				return choiceMsg(choice)
 			}
 		case *pb.ActReply_AnalysisResult:
+			trace.Event(s.ctx, "recv analysis result")
 			return DoneMsg{}
 		}
 
@@ -116,6 +120,21 @@ func (s AnalysisView) Init() tea.Cmd {
 
 const formKeyBool = "bool"
 
+func (s AnalysisView) fmtLogHeader(source string) string {
+	return fmt.Sprintf(
+		"%s%s%s%s%s ",
+		s.braceStyle.Render("["),
+		s.nameStyle.Render("analysis"),
+		s.braceStyle.Render("/"),
+		s.sourceStyle.Render(source),
+		s.braceStyle.Render("]"),
+	)
+}
+
+func (s AnalysisView) writeLogHeader(source string) {
+	s.hist.WriteString(s.fmtLogHeader(source))
+}
+
 func (s AnalysisView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -131,18 +150,50 @@ func (s AnalysisView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		s.err = msg
 		return s, tea.Quit
 	case LogMsg:
-		if s.hist.Len() > 0 {
-			s.hist.WriteString("\n")
+		bs := []byte(msg.body)
+
+		if s.histPrevSrc != msg.source && s.histContLine {
+			s.histContLine = false
+			s.histPrevSrc = msg.source
+			s.hist.WriteByte('\n')
 		}
-		s.hist.WriteString(fmt.Sprintf(
-			"%s%s%s%s%s %s",
-			s.braceStyle.Render("["),
-			s.nameStyle.Render("analysis"),
-			s.braceStyle.Render("/"),
-			s.sourceStyle.Render(msg.source),
-			s.braceStyle.Render("]"),
-			msg.body,
-		))
+
+		if len(bs) < 1 {
+			trace.Event(s.ctx, "received empty log message", attr.String("source", msg.source))
+			return s, s.recvMsgCmd()
+		} else {
+			trace.Event(s.ctx, "received log message", attr.String("source", msg.source), attr.String("body", msg.body))
+		}
+
+		for {
+			i := bytes.IndexByte(bs, '\n')
+			if i == -1 {
+				break
+			}
+
+			line := bs[:i+1]
+			bs = bs[i+1:]
+
+			if s.histContLine {
+				s.hist.Write(line)
+				s.histContLine = false
+				continue
+			}
+
+			s.writeLogHeader(msg.source)
+			s.hist.Write(line)
+
+			if len(bs) < 1 {
+				return s, s.recvMsgCmd()
+			}
+		}
+
+		if !s.histContLine {
+			s.writeLogHeader(msg.source)
+		}
+		s.hist.Write(bs)
+		s.histContLine = true
+
 		return s, s.recvMsgCmd()
 	case choiceMsg:
 		var f *huh.Form
@@ -221,17 +272,23 @@ func (s AnalysisView) View() string {
 		return fmt.Sprintf(
 			"%s\n%s",
 			s.hist.String(),
-			s.choice.View())
+			s.choice.View(),
+		)
 	}
 
-	if s.hist.Len() > 0 {
+	if s.histContLine {
 		return fmt.Sprintf("%s %s\n", s.hist.String(), s.spinner.View())
+	} else if s.hist.Len() < 1 {
+		return fmt.Sprintf(
+			"%s %s",
+			s.fmtLogHeader("..."),
+			s.spinner.View(),
+		)
 	} else {
 		return fmt.Sprintf(
-			"%s%s%s %s",
-			s.braceStyle.Render("["),
-			s.nameStyle.Render("analysis"),
-			s.braceStyle.Render("]"),
+			"%s%s %s",
+			s.hist.String(),
+			s.fmtLogHeader("..."),
 			s.spinner.View(),
 		)
 	}

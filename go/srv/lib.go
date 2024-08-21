@@ -33,6 +33,8 @@ import (
 )
 
 type Push struct {
+	hasAssistant bool
+
 	analysis *pb.AnalysisResult
 }
 
@@ -64,27 +66,6 @@ func newErrorReply(error string) *pb.ActReply {
 				Error: error,
 			},
 		},
-	}
-}
-
-func mkSendError(ctx context.Context, stream ActServer) func(string, ...any) error {
-	return func(msgf string, args ...any) error {
-		oerr := terror.Errorf(ctx, msgf, args...)
-		err := stream.Send(newErrorReply(oerr.Error()))
-		if err != nil {
-			_ = terror.Errorf(ctx, "stream send: %w", err)
-		}
-		return nil
-	}
-}
-
-func mkInternalError(ctx context.Context, stream ActServer) func(string, ...any) error {
-	span := tr.SpanFromContext(ctx)
-	sendError := mkSendError(ctx, stream)
-
-	return func(msgf string, args ...any) error {
-		_ = terror.Errorf(ctx, msgf, args...)
-		return sendError(fmt.Sprintf("Internal Error: Support ID: %s", span.SpanContext().SpanID()))
 	}
 }
 

@@ -36,7 +36,8 @@ type Globals struct {
 }
 
 type PushCmd struct {
-	Path string `arg:"" optional:"" name:"path" help:"Path to the source code to be pushed" type:"path"`
+	Path      string `arg:"" optional:"" name:"path" help:"Path to the source code to be pushed" type:"path"`
+	Assistant string `env:"AYUP_ASSISTANT_PATH" help:"The location of the assistant plugin source if any" type:"path"`
 
 	Host       string `env:"AYUP_PUSH_HOST" default:"localhost:50051" help:"The location of a service we can push to"`
 	P2pPrivKey string `env:"AYUP_CLIENT_P2P_PRIV_KEY" help:"Secret encryption key produced by 'ay key new'"`
@@ -44,11 +45,20 @@ type PushCmd struct {
 
 func (s *PushCmd) Run(g Globals) (err error) {
 	pprof.Do(g.Ctx, pprof.Labels("command", "push"), func(ctx context.Context) {
+		if s.Path == "" {
+			s.Path, err = os.Getwd()
+			if err != nil {
+				err = terror.Errorf(ctx, "getwd: %w", err)
+				return
+			}
+		}
+
 		p := push.Pusher{
-			Tracer:     g.Tracer,
-			Host:       s.Host,
-			P2pPrivKey: s.P2pPrivKey,
-			SrcDir:     s.Path,
+			Tracer:       g.Tracer,
+			Host:         s.Host,
+			P2pPrivKey:   s.P2pPrivKey,
+			AssistantDir: s.Assistant,
+			SrcDir:       s.Path,
 		}
 
 		err = p.Run(pprof.WithLabels(g.Ctx, pprof.Labels("command", "push")))
