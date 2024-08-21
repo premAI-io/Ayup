@@ -136,11 +136,13 @@ func (s *Pusher) Run(ctx context.Context) error {
 	}
 	s.Client = client
 
-	if err := s.Sync(ctx); err != nil {
+	if err := s.Upload(ctx); err != nil {
 		return err
 	}
 
 	var wg sync.WaitGroup
+	defer wg.Wait()
+
 	fwdLis, fwdErr := s.startPortForwarder(ctx, &wg)
 	defer func() {
 		if fwdErr == nil {
@@ -153,7 +155,9 @@ func (s *Pusher) Run(ctx context.Context) error {
 		return err
 	}
 
-	wg.Wait()
+	if err := s.Download(ctx); err != nil {
+		return err
+	}
 
 	return nil
 }

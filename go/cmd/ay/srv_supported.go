@@ -39,9 +39,10 @@ func (s *DaemonStartCmd) Run(g Globals) (err error) {
 		}
 
 		r := srv.Srv{
-			SrcDir:     filepath.Join(tmp, "src"),
-			Host:       s.Host,
-			P2pPrivKey: s.P2pPrivKey,
+			AssistantDir: filepath.Join(tmp, "ass"),
+			SrcDir:       filepath.Join(tmp, "src"),
+			Host:         s.Host,
+			P2pPrivKey:   s.P2pPrivKey,
 		}
 
 		var authedClients []peer.ID
