@@ -23,7 +23,8 @@ type Pusher struct {
 	P2pPrivKey string
 	Client     pb.SrvClient
 
-	SrcDir string
+	AssistantDir string
+	SrcDir       string
 }
 
 type LogView struct {

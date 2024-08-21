@@ -13,11 +13,17 @@ service Srv {
     rpc Forward(stream ForwardRequest) returns (stream ForwardResponse);
 }
 
+enum Source {
+    app = 0;
+    assistant = 1;
+}
+
 message FileChunk {
     string path = 1;
     bytes data = 2;
     int64 offset = 3;
     bool last = 4;
+    Source source = 5;
 }
 
 message FileChunks {
