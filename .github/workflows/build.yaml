@@ -57,22 +57,31 @@ jobs:
   release-dryrun:
     runs-on: ubuntu-22.04
     needs: [build-lint, build-cross, generate-src]
-    if: github.event_name == 'pull_request'
+    if: github.ref_type != 'tag'
     steps:
       - uses: actions/download-artifact@v4
-      - name: list artifacts
+      - id: prepare-artifacts
+        name: list artifacts
         run: |
           find
           cd src
           tar -czvf ../generated-src.tar.gz *
           cd ../
-          mv src/go/version.txt ./
+          echo "ver=$(cat src/go/version.txt)" >> "$GITHUB_OUTPUT"
           rm -r src
           for d in cli-*; do
             mv $d/ay ay-${d#cli-}
             rmdir $d
           done
           find
+      - name: check-version
+        run: |
+            if [[ ${{ steps.prepare-artifacts.outputs.ver }} =~ [0-9]+\.[0-9]+\.[0-9]+ ]]; then
+                echo ok
+            else
+                echo "::error file=go/version.txt::Tag Incorrect version format"
+                exit 1
+            fi
 
   release:
     runs-on: ubuntu-22.04
@@ -84,18 +93,19 @@ jobs:
       attestations: write
     steps:
       - uses: actions/download-artifact@v4
-      - name: prepare-artifacts
+      - id: prepare-artifacts
+        name: prepare artifacts
         run: |
           cd src
           tar -czvf ../generated-src.tar.gz *
           cd ../
-          echo ver=$(cat src/go/version.txt) | tee -a "$GITHUB_OUTPUT"
+          echo "ver=$(cat src/go/version.txt)" >> "$GITHUB_OUTPUT"
           rm -r src
           for d in cli-*; do
             mv $d/ay ay-${d#cli-}
             rmdir $d
           done
-      - name: check-version
+      - name: check version
         run: |
             if [[ ${{ github.ref }} =~ ${{ steps.prepare-artifacts.outputs.ver }}$ ]]; then
                 echo ok
