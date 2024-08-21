@@ -39,7 +39,8 @@ type Push struct {
 type Srv struct {
 	pb.UnimplementedSrvServer
 
-	SrcDir string
+	AssistantDir string
+	SrcDir       string
 
 	Host             string
 	P2pPrivKey       string

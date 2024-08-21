@@ -18,62 +18,15 @@ import (
 	"premai.io/Ayup/go/internal/terror"
 )
 
-func (s *Pusher) Sync(pctx context.Context) (err error) {
-	ctx, span := trace.Span(pctx, "sync")
+type syncCtx struct {
+	stream      pb.Srv_SyncClient
+	cancelChan  chan struct{}
+	logViewProg *tea.Program
+}
+
+func (s syncCtx) syncDir(ctx context.Context, source pb.Source, path string) (err error) {
+	ctx, span := trace.Span(ctx, "sync dir", attribute.String("path", path))
 	defer span.End()
-
-	var wdir string
-
-	if s.SrcDir == "" {
-		wdir, err = os.Getwd()
-		if err != nil {
-			return terror.Errorf(ctx, "getwd: %w", err)
-		}
-	} else {
-		wdir = s.SrcDir
-	}
-
-	dfs := os.DirFS(wdir)
-
-	stream, err := s.Client.Sync(ctx)
-	if err != nil {
-		return terror.Errorf(ctx, "sync stream: %w", err)
-	}
-
-	defer func() {
-		res, err2 := stream.CloseAndRecv()
-		if err2 == nil || err2 == io.EOF {
-			if res == nil {
-				err2 = terror.Errorf(ctx, "stream close and recv: no response")
-			} else if res.Error != nil {
-				err = terror.Errorf(ctx, "%s", res.Error.Error)
-			}
-		} else {
-			err2 = terror.Errorf(ctx, "stream close and recv: %w", err2)
-		}
-
-		if err == nil {
-			err = err2
-		}
-	}()
-
-	var wg sync.WaitGroup
-	defer wg.Wait()
-
-	cancelChan := make(chan struct{})
-	logViewProg := tea.NewProgram(NewLogView("sync", cancelChan))
-	defer logViewProg.Send(DoneMsg{})
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-
-		_, err := logViewProg.Run()
-		if err != nil {
-			terror.Ackf(ctx, "logView run: %w", err)
-			cancelChan <- struct{}{}
-		}
-	}()
 
 	buf := make([]byte, 16*1024)
 	chunks := make([]*pb.FileChunk, 0, 32)
@@ -86,8 +39,8 @@ func (s *Pusher) Sync(pctx context.Context) (err error) {
 		}
 
 		select {
-		case <-cancelChan:
-			if err := stream.Send(&pb.FileChunks{
+		case <-s.cancelChan:
+			if err := s.stream.Send(&pb.FileChunks{
 				Cancel: true,
 			}); err != nil {
 				return terror.Errorf(ctx, "stream send: %w", err)
@@ -97,7 +50,7 @@ func (s *Pusher) Sync(pctx context.Context) (err error) {
 		default:
 		}
 
-		if err := stream.Send(&pb.FileChunks{
+		if err := s.stream.Send(&pb.FileChunks{
 			Chunk: chunks,
 		}); err != nil {
 			return terror.Errorf(ctx, "stream send: %w", err)
@@ -146,6 +99,7 @@ func (s *Pusher) Sync(pctx context.Context) (err error) {
 			}
 
 			chunks = append(chunks, &pb.FileChunk{
+				Source: source,
 				Path:   path,
 				Last:   last,
 				Data:   buf[length : length+chunkLength],
@@ -162,6 +116,8 @@ func (s *Pusher) Sync(pctx context.Context) (err error) {
 
 		return nil
 	}
+
+	dfs := os.DirFS(path)
 
 	err = fs.WalkDir(dfs, ".", func(path string, d fs.DirEntry, err error) error {
 
@@ -186,7 +142,7 @@ func (s *Pusher) Sync(pctx context.Context) (err error) {
 
 		skipNotice := func(kind string) {
 			span.AddEvent("skip", tr.WithAttributes(event_attrs...))
-			logViewProg.Send(LogMsg{
+			s.logViewProg.Send(LogMsg{
 				source: "ayup",
 				body:   fmt.Sprintf("Skip %s: %s", kind, path),
 			})
@@ -221,7 +177,7 @@ func (s *Pusher) Sync(pctx context.Context) (err error) {
 			unit = "Kb"
 			size /= 1000
 		}
-		logViewProg.Send(LogMsg{
+		s.logViewProg.Send(LogMsg{
 			source: "ayup",
 			body:   fmt.Sprintf("Send %d%s: %s", size, unit, path),
 		})
@@ -234,13 +190,83 @@ func (s *Pusher) Sync(pctx context.Context) (err error) {
 		return sendFile(path, r)
 	})
 
-	if err != nil {
-		return
-	}
-
 	if err = sendFileChunks(); err != nil {
 		return
 	}
+
+	return
+}
+
+func (s *Pusher) Sync(pctx context.Context) (err error) {
+	ctx, span := trace.Span(pctx, "sync")
+	defer span.End()
+
+	var src string
+
+	if s.SrcDir == "" {
+		src, err = os.Getwd()
+		if err != nil {
+			return terror.Errorf(ctx, "getwd: %w", err)
+		}
+	} else {
+		src = s.SrcDir
+	}
+
+	stream, err := s.Client.Sync(ctx)
+	if err != nil {
+		return terror.Errorf(ctx, "sync stream: %w", err)
+	}
+
+	defer func() {
+		res, err2 := stream.CloseAndRecv()
+		if err2 == nil || err2 == io.EOF {
+			if res == nil {
+				err2 = terror.Errorf(ctx, "stream close and recv: no response")
+			} else if res.Error != nil {
+				err = terror.Errorf(ctx, "%s", res.Error.Error)
+			}
+		} else {
+			err2 = terror.Errorf(ctx, "stream close and recv: %w", err2)
+		}
+
+		if err == nil {
+			err = err2
+		}
+	}()
+
+	var wg sync.WaitGroup
+	defer wg.Wait()
+
+	cancelChan := make(chan struct{})
+	logViewProg := tea.NewProgram(NewLogView("sync", cancelChan))
+	defer logViewProg.Send(DoneMsg{})
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		_, err := logViewProg.Run()
+		if err != nil {
+			terror.Ackf(ctx, "logView run: %w", err)
+			cancelChan <- struct{}{}
+		}
+	}()
+
+	sc := syncCtx{
+		stream:      stream,
+		cancelChan:  cancelChan,
+		logViewProg: logViewProg,
+	}
+
+	if err := sc.syncDir(ctx, pb.Source_app, src); err != nil {
+		return err
+	}
+
+	if s.AssistantDir == "" {
+		return
+	}
+
+	err = sc.syncDir(ctx, pb.Source_assistant, s.AssistantDir)
 
 	return
 }

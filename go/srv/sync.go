@@ -93,6 +93,13 @@ func (s *Srv) Sync(stream pb.Srv_SyncServer) error {
 			}
 
 			dstPath := filepath.Join(s.SrcDir, path)
+			switch chunk.Source {
+			case pb.Source_app:
+			case pb.Source_assistant:
+				dstPath = filepath.Join(s.AssistantDir, path)
+			default:
+				return internalError("unrecognized source: %d", chunk.Source)
+			}
 
 			file, alreadyOpen := openFiles[dstPath]
 			if !alreadyOpen {
