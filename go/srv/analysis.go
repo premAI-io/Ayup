@@ -121,7 +121,6 @@ func (s *Srv) Analysis(stream pb.Srv_AnalysisServer) error {
 			"--local", fmt.Sprintf("context=%s", s.SrcDir),
 			"--local", fmt.Sprintf("dockerfile=%s", s.SrcDir),
 		)
-		cmd.Env = filterEnv(cmd)
 
 		in, out := startProc(ctx, cmd)
 
@@ -396,18 +395,6 @@ func (s *Srv) MkLlb(ctx context.Context) (*llb.Definition, error) {
 	}
 
 	return dt, nil
-}
-
-func filterEnv(cmd *exec.Cmd) []string {
-	// https://github.com/moby/moby/issues/46129#issuecomment-2016552967
-	var env []string
-	for _, kv := range cmd.Environ() {
-		if !strings.HasPrefix(kv, "OTEL_EXPORTER_OTLP_ENDPOINT=") {
-			env = append(env, kv)
-		}
-	}
-
-	return env
 }
 
 func buildkitStatusSender(ctx context.Context, stream pb.Srv_AnalysisServer) chan *client.SolveStatus {

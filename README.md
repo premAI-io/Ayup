@@ -213,10 +213,12 @@ docker run -d --name jaeger \
                     jaegertracing/all-in-one:latest
 ```
 
+Note that the collector must support gRPC traces.
+
 Ayup only sends traces if the standard environment variable is set
 
 ```sh
-OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317 ay ...
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317 ay ...
 ```
 
 You can view the traces at `http://localhost:16686` or wherever the collector/viewer is hosted.

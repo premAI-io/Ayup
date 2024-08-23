@@ -144,12 +144,11 @@ var cli struct {
 		New KeyNewCmd `cmd:"" help:"Create a new private key"`
 	} `cmd:"" help:"Manage encryption keys used by Ayup"`
 
-	P2pPrivKey string `env:"AYUP_P2P_PRIV_KEY" help:"Secret encryption key produced by 'ay key new'"`
-
 	// maybe effected by https://github.com/open-telemetry/opentelemetry-go/issues/5562
 	// also https://github.com/moby/moby/issues/46129#issuecomment-2016552967
-	TelemetryEndpoint string `group:"monitoring" env:"OTEL_EXPORTER_OTLP_ENDPOINT" help:"the host that telemetry data is sent to; e.g. localhost:4317"`
-	ProfilingEndpoint string `group:"monitoring" env:"PYROSCOPE_ADHOC_SERVER_ADDRESS" help:"URL performance data is sent to; e.g. http://localhost:4040"`
+	TelemetryEndpoint       string `group:"monitoring" env:"OTEL_EXPORTER_OTLP_ENDPOINT" help:"the host that telemetry data is sent to; e.g. http://localhost:4317"`
+	TelemetryEndpointTraces string `group:"monitoring" env:"OTEL_EXPORTER_OTLP_TRACES_ENDPOINT" help:"the host that traces data is sent to http://localhost:4317"`
+	ProfilingEndpoint       string `group:"monitoring" env:"PYROSCOPE_ADHOC_SERVER_ADDRESS" help:"URL performance data is sent to; e.g. http://localhost:4040"`
 }
 
 func main() {
@@ -173,15 +172,17 @@ func main() {
 
 	ayTrace.SetupPyroscopeProfiling(cli.ProfilingEndpoint)
 
-	stopTracing, err := ayTrace.SetupOTelSDK(ctx, cli.TelemetryEndpoint)
-	if err != nil {
-		log.Fatalln(err)
-	}
-	defer func() {
-		if err := stopTracing(ctx); err != nil {
+	if cli.TelemetryEndpoint != "" || cli.TelemetryEndpointTraces != "" {
+		stopTracing, err := ayTrace.SetupOTelSDK(ctx)
+		if err != nil {
 			log.Fatalln(err)
 		}
-	}()
+		defer func() {
+			if err := stopTracing(ctx); err != nil {
+				log.Fatalln(err)
+			}
+		}()
+	}
 
 	tracer := otel.Tracer("premai.io/Ayup/go/internal/trace")
 	logger := otelslog.NewLogger("premai.io/Ayup/go/internal/trace")
@@ -193,7 +194,7 @@ func main() {
 	terror.Ackf(ctx, "os UserConfigDir: %w", userConfDirErr)
 	terror.Ackf(ctx, "godotenv load: %w", godotenvLoadErr)
 
-	err = ktx.Run(Globals{
+	err := ktx.Run(Globals{
 		Ctx:    ctx,
 		Tracer: tracer,
 		Logger: logger,
