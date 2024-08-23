@@ -6,18 +6,57 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"premai.io/Ayup/go/internal/terror"
 
 	"github.com/joho/godotenv"
 )
 
-func confFilePath(ctx context.Context) (string, error) {
-	confDir, err := os.UserConfigDir()
-	if err != nil {
-		return "", terror.Errorf(ctx, "os UserConfigDir: %w", err)
+//User* functions were adapted from buildkit appdefaults
+
+func UserRuntimeDir() string {
+	//  pam_systemd sets XDG_RUNTIME_DIR but not other dirs.
+	if xdgRuntimeDirs := os.Getenv("XDG_RUNTIME_DIR"); xdgRuntimeDirs != "" {
+		dirs := strings.Split(xdgRuntimeDirs, ":")
+		return filepath.Join(dirs[0], "ayup")
 	}
-	if err := os.MkdirAll(filepath.Join(confDir, "ayup"), 0700); err != nil {
+
+	return "/run/ayup"
+}
+
+// UserRoot typically returns /home/$USER/.local/share/ayup
+func UserRoot() string {
+	//  pam_systemd sets XDG_RUNTIME_DIR but not other dirs.
+	xdgDataHome := os.Getenv("XDG_DATA_HOME")
+	if xdgDataHome != "" {
+		dirs := strings.Split(xdgDataHome, ":")
+		return filepath.Join(dirs[0], "ayup")
+	}
+	home := os.Getenv("HOME")
+	if home != "" {
+		return filepath.Join(home, ".local", "share", "ayup")
+	}
+	return "/var/lib/ayup"
+}
+
+// UserConfigDir returns dir for storing config. /home/$USER/.config/ayup/
+func UserConfigDir() string {
+	xdgConfigHome := os.Getenv("XDG_CONFIG_HOME")
+	if xdgConfigHome != "" {
+		return filepath.Join(xdgConfigHome, "ayup")
+	}
+	home := os.Getenv("HOME")
+	if home != "" {
+		return filepath.Join(home, ".config", "ayup")
+	}
+	return "/etc/ayup"
+}
+
+func confFilePath(ctx context.Context) (string, error) {
+	confDir := UserConfigDir()
+
+	if err := os.MkdirAll(confDir, 0700); err != nil {
 		return "", terror.Errorf(ctx, "os MkdirAll: %w", err)
 	}
 
@@ -94,3 +133,5 @@ func Set(ctx context.Context, key string, val string) error {
 
 	return write(ctx, path, confMap)
 }
+
+// Adapted from buildkit appdefaults
