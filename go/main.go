@@ -65,7 +65,6 @@ func (s *PushCmd) Run(g Globals) (err error) {
 type DaemonStartCmd struct {
 	Host           string `env:"AYUP_DAEMON_HOST" default:":50051" help:"The addresses and port to listen on"`
 	ContainerdAddr string `env:"AYUP_CONTAINERD_ADDR" help:"The path to the containerd socket if not using Docker's" default:"/var/run/docker/containerd/containerd.sock"`
-	BuildkitdAddr  string `env:"AYUP_BUILDKITD_ADDR" help:"The path to the buildkitd socket if not the default" default:"unix:///run/buildkit/buildkitd.sock"`
 
 	P2pAuthorizedClients string `env:"AYUP_P2P_AUTHORIZED_CLIENTS" help:"Comma deliminated public keys of logged in clients"`
 }
@@ -80,14 +79,12 @@ func (s *DaemonStartCmd) Run(g Globals) (err error) {
 		}
 
 		r := srv.Srv{
-			TmpDir:     tmp,
-			SrcDir:     filepath.Join(tmp, "src"),
-			ImgTarPath: filepath.Join(tmp, "image.tar"),
-			ImgName:    "docker.io/richardprem/ayup:test",
-
+			TmpDir:         tmp,
+			SrcDir:         filepath.Join(tmp, "src"),
+			ImgTarPath:     filepath.Join(tmp, "image.tar"),
+			ImgName:        "docker.io/richardprem/ayup:test",
 			Host:           s.Host,
 			ContainerdAddr: s.ContainerdAddr,
-			BuildkitdAddr:  s.BuildkitdAddr,
 			P2pPrivKey:     cli.P2pPrivKey,
 		}
 

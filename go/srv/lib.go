@@ -7,9 +7,8 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sync"
-
-	"github.com/charmbracelet/lipgloss"
 
 	gostream "github.com/libp2p/go-libp2p-gostream"
 	p2pPeer "github.com/libp2p/go-libp2p/core/peer"
@@ -17,10 +16,12 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/peer"
 
+	"premai.io/Ayup/go/internal/conf"
 	pb "premai.io/Ayup/go/internal/grpc/srv"
 	"premai.io/Ayup/go/internal/rpc"
 	"premai.io/Ayup/go/internal/terror"
 	"premai.io/Ayup/go/internal/trace"
+	"premai.io/Ayup/go/internal/tui"
 
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	attr "go.opentelemetry.io/otel/attribute"
@@ -351,17 +352,45 @@ func (s *Srv) checkPeerAuth(ctx context.Context) (bool, error) {
 	return false, nil
 }
 
+func (s *Srv) runRootlessBuildkit(ctx context.Context) (tr.Span, <-chan procOut) {
+	ctx, span := trace.Span(ctx, "start buildkit")
+
+	s.BuildkitdAddr = "unix://" + filepath.Join(conf.UserRuntimeDir(), "buildkit", "buildkit.sock")
+
+	cmdArgs := []string{
+		"--port-driver=builtin",
+		"--publish=127.0.0.1:5000:5000/tcp",
+		"--net=slirp4netns",
+		"--copy-up=/etc",
+		"--disable-host-loopback",
+
+		"buildkitd",
+		"--containerd-worker=false",
+		"--config", filepath.Join(conf.UserConfigDir(), "buildkit", "buildkitd.toml"),
+		"--root", filepath.Join(conf.UserRoot(), "buildkit"),
+		"--addr", s.BuildkitdAddr,
+	}
+
+	cmd := exec.Command("rootlesskit", cmdArgs...)
+
+	_, po := startProc(ctx, cmd)
+
+	return span, po
+}
+
 func (s *Srv) RunServer(pctx context.Context) (err error) {
 	ctx := trace.SetSpanKind(pctx, tr.SpanKindServer)
 	ctx, span := trace.Span(ctx, "start srv")
 	defer span.End()
+
+	buildkitSpan, buildkitOut := s.runRootlessBuildkit(ctx)
 
 	privKey, err := rpc.EnsurePrivKey(ctx, s.P2pPrivKey)
 	if err != nil {
 		return err
 	}
 
-	titleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("098")).Bold(true)
+	titleStyle := tui.TitleStyle
 	if err != nil {
 		return terror.Errorf(ctx, "peer IDFromPublicKey: %w", err)
 	}
@@ -397,6 +426,24 @@ func (s *Srv) RunServer(pctx context.Context) (err error) {
 	pb.RegisterSrvServer(srv, s)
 	span.AddEvent("Listening")
 	span.End()
+
+	go func() {
+		for pout := range buildkitOut {
+			if pout.err != nil || pout.ret != nil {
+				s.tuiMutex.Lock()
+				if pout.err != nil {
+					fmt.Println(tui.ErrorStyle.Render("Buildkitd Error!"), pout.err)
+				}
+				if pout.ret != nil {
+					fmt.Println(tui.TitleStyle.Render("Buildkit exited:"), *pout.ret)
+				}
+				s.tuiMutex.Unlock()
+			}
+		}
+
+		buildkitSpan.End()
+		srv.GracefulStop()
+	}()
 
 	if err := srv.Serve(lis); err != nil {
 		return terror.Errorf(ctx, "serve: %w", err)
