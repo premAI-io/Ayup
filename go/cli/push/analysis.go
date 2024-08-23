@@ -40,7 +40,6 @@ type AnalysisView struct {
 }
 
 type choiceMsg *pb.ChoiceBool
-type resultMsg *pb.AnalysisResult
 
 func NewAnalysisView(ctx context.Context, stream pb.Srv_AnalysisClient) AnalysisView {
 	var hist strings.Builder
@@ -73,34 +72,29 @@ func (s AnalysisView) recvMsgCmd() tea.Cmd {
 			return terror.Errorf(s.ctx, "stream recv: %w", err)
 		}
 
-		if res.GetError() != nil {
-			return terror.Errorf(s.ctx, "%s", res.GetError().Error)
-		}
-
-		log := res.GetLog()
-		if log != "" {
-			return LogMsg{
-				source: res.GetSource(),
-				body:   log,
-			}
-		}
-
-		choice := res.GetChoice().GetBool()
-		if choice != nil {
-			return choiceMsg(choice)
-		}
-
-		result := res.GetAnalysisResult()
-		if result != nil {
-			return resultMsg(result)
-		}
-
 		if res.Variant == nil {
 			// TODO: sent by proc watcher for success, not needed for analysis anymore
 			return DoneMsg{}
-		} else {
-			return terror.Errorf(s.ctx, "Can't handle remote response: %v", res)
 		}
+
+		switch v := res.Variant.(type) {
+		case *pb.ActReply_Error:
+			return terror.Errorf(s.ctx, "%s", v.Error)
+		case *pb.ActReply_Log:
+			return LogMsg{
+				source: res.GetSource(),
+				body:   v.Log,
+			}
+		case *pb.ActReply_Choice:
+			choice := v.Choice.GetBool()
+			if choice != nil {
+				return choiceMsg(choice)
+			}
+		case *pb.ActReply_AnalysisResult:
+			return DoneMsg{}
+		}
+
+		return terror.Errorf(s.ctx, "Can't handle remote response: %v", res)
 	}
 }
 
@@ -109,7 +103,7 @@ func (s AnalysisView) sendCmd(req *pb.ActReq) tea.Cmd {
 		s.span.AddEvent("sending req")
 		if err := s.stream.Send(req); err != nil {
 			terror.Ackf(s.ctx, "stream sendMsg: %w", err)
-			return tea.Quit
+			return DoneMsg{}
 		}
 
 		return nil
@@ -266,6 +260,15 @@ func (s *Pusher) Analysis(pctx context.Context) (result *pb.AnalysisResult, err 
 	view := NewAnalysisView(ctx, stream)
 	prog := tea.NewProgram(view, tea.WithContext(ctx))
 	model, err := prog.Run()
+	if err != nil {
+		return nil, err
+	}
+
+	view = model.(AnalysisView)
+
+	if view.err != nil {
+		return nil, view.err
+	}
 
 	msg, err := stream.Recv()
 	if msg != nil {
@@ -273,15 +276,7 @@ func (s *Pusher) Analysis(pctx context.Context) (result *pb.AnalysisResult, err 
 	}
 	if err != io.EOF {
 		return nil, terror.Errorf(ctx, "stream recv should end: %w", err)
-	} else {
-		err = nil
 	}
 
-	view = model.(AnalysisView)
-
-	if view.err != nil {
-		err = view.err
-	}
-
-	return view.result, err
+	return view.result, nil
 }

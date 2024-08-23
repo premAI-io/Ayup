@@ -4,10 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"os/exec"
 	"strings"
-
-	tr "go.opentelemetry.io/otel/trace"
 
 	"github.com/gofiber/contrib/otelfiber"
 	"github.com/gofiber/fiber/v2"
@@ -129,47 +126,4 @@ func (s *Srv) Forward(stream pb.Srv_ForwardServer) error {
 	}
 
 	return err
-}
-
-func (s *Srv) Run(stream pb.Srv_RunServer) (err error) {
-	ctx := stream.Context()
-	ctx = trace.SetSpanKind(ctx, tr.SpanKindServer)
-
-	recvChan := mkRecvChan(ctx, stream)
-
-	cmdArgs := []string{
-		"--address", s.ContainerdAddr, "--namespace", "buildkit",
-		"run", "--rm", "-p", "127.0.0.1:5000:5000", s.ImgName,
-	}
-
-	if s.push.analysis.UsePythonRequirements {
-		cmdArgs = append(cmdArgs, "python3", "/app/__main__.py")
-	}
-
-	if err = func() (err error) {
-		ctx, span := trace.Span(ctx, "docker run")
-		defer span.End()
-
-		procWait := mkProcWaiter(ctx, stream, recvChan)
-
-		cmd := exec.Command("nerdctl", cmdArgs...)
-		in, out := startProc(ctx, cmd)
-		proxy := mkProxy()
-		go func() {
-			if err := proxy.Listen(":8080"); err != nil {
-				terror.Ackf(ctx, "proxy lisent: %w", err)
-			}
-		}()
-		defer func() {
-			if err := proxy.ShutdownWithContext(ctx); err != nil {
-				terror.Ackf(ctx, "proxy shutdown: %w", err)
-			}
-		}()
-
-		return procWait("nerdctl run", in, out)
-	}(); err != nil {
-		return
-	}
-
-	return nil
 }

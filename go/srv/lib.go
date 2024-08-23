@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -90,31 +89,9 @@ type recvReq struct {
 	err error
 }
 
-func mkRecvChan(ctx context.Context, stream ActServer) chan recvReq {
-	c := make(chan recvReq)
-
-	go func(ctx context.Context) {
-		for {
-			req, err := stream.Recv()
-			if err != nil && err != io.EOF {
-				err = terror.Errorf(ctx, "stream recv: %w", err)
-			}
-
-			c <- recvReq{req, err}
-
-			if err == io.EOF {
-				break
-			}
-		}
-	}(ctx)
-
-	return c
-}
-
 type procOut struct {
-	stdio string
-	err   error
-	ret   *int
+	err error
+	ret *int
 }
 
 type procIn struct {
@@ -165,12 +142,6 @@ func startProc(ctx context.Context, cmd *exec.Cmd) (chan<- procIn, <-chan procOu
 		for scanner.Scan() {
 			text := scanner.Text()
 			span.AddEvent("log", tr.WithAttributes(attr.String("text", text)))
-
-			if text != "" {
-				procOutChan <- procOut{
-					stdio: scanner.Text(),
-				}
-			}
 		}
 	}
 
@@ -247,58 +218,6 @@ func startProc(ctx context.Context, cmd *exec.Cmd) (chan<- procIn, <-chan procOu
 	}()
 
 	return procInChan, procOutChan
-}
-
-type procWaiterFn func(string, chan<- procIn, <-chan procOut) error
-
-func mkProcWaiter(ctx context.Context, stream ActServer, recvChan chan recvReq) procWaiterFn {
-	sendError := mkSendError(ctx, stream)
-	internalError := mkInternalError(ctx, stream)
-	sendLog := func(source string, text string) error {
-		return stream.Send(&pb.ActReply{
-			Source: source,
-			Variant: &pb.ActReply_Log{
-				Log: text,
-			},
-		})
-	}
-
-	return func(name string, in chan<- procIn, out <-chan procOut) (err error) {
-		for {
-			select {
-			case r := <-recvChan:
-				in <- procIn{cancel: true}
-
-				if r.err != nil && r.err == io.EOF {
-					err = stream.Send(newErrorReply(r.err.Error()))
-				} else if r.req.GetCancel() {
-					err = sendLog("ayup", "User cancelled")
-				} else {
-					err = sendError("Unexpected request: %v", r.req)
-				}
-			case e := <-out:
-				if e.stdio != "" {
-					if err = sendLog(name, e.stdio); err == nil {
-						continue
-					}
-				}
-
-				if e.ret != nil {
-					if *e.ret > 0 {
-						return sendError("%s returned: %d", name, *e.ret)
-					} else {
-						err = stream.Send(&pb.ActReply{})
-					}
-				}
-
-				if e.err != nil {
-					err = internalError("%s: %w", name, e.err)
-				}
-
-				return err
-			}
-		}
-	}
 }
 
 func remotePeerId(ctx context.Context) (peerId p2pPeer.ID, err error) {

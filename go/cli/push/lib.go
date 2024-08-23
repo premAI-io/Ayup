@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
@@ -138,10 +139,20 @@ func (s *Pusher) Run(ctx context.Context) error {
 		return err
 	}
 
+	var wg sync.WaitGroup
+	fwdLis, fwdErr := s.startPortForwarder(ctx, &wg)
+	defer func() {
+		if fwdErr == nil {
+			_ = fwdLis.Close()
+		}
+	}()
+
 	_, err = s.Analysis(ctx)
 	if err != nil {
 		return err
 	}
 
-	return s.RunDocker(ctx)
+	wg.Wait()
+
+	return nil
 }

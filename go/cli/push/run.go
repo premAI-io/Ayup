@@ -3,12 +3,10 @@ package push
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"net"
 	"sync"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"premai.io/Ayup/go/internal/terror"
 	"premai.io/Ayup/go/internal/trace"
 
@@ -16,9 +14,6 @@ import (
 )
 
 func (s *Pusher) startPortForwarder(ctx context.Context, wg *sync.WaitGroup) (net.Listener, error) {
-	wg.Add(1)
-	defer wg.Done()
-
 	listener, err := net.Listen("tcp", "localhost:5000")
 	if err != nil {
 		return nil, terror.Errorf(ctx, "net listen: %w", err)
@@ -109,7 +104,10 @@ func (s *Pusher) startPortForwarder(ctx context.Context, wg *sync.WaitGroup) (ne
 		trace.Event(ctx, "conn done")
 	}
 
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
+
 		conns := make([]net.Conn, 0, 16)
 		for {
 			conn, err := listener.Accept()
@@ -134,122 +132,4 @@ func (s *Pusher) startPortForwarder(ctx context.Context, wg *sync.WaitGroup) (ne
 	}()
 
 	return listener, nil
-}
-
-func (s *Pusher) RunDocker(ctx context.Context) (err error) {
-	ctx, span := trace.Span(ctx, "run")
-	defer span.End()
-
-	stream, err := s.Client.Run(ctx)
-	if err != nil {
-		return terror.Errorf(ctx, "client run: %w", err)
-	}
-	defer func() {
-		err2 := stream.CloseSend()
-		if err == nil {
-			err = err2
-		}
-	}()
-
-	cancelChan := make(chan struct{})
-	logView := NewLogView("run", cancelChan)
-	var wg sync.WaitGroup
-	defer wg.Wait()
-
-	logViewProg := tea.NewProgram(logView, tea.WithContext(ctx))
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-
-		_, err := logViewProg.Run()
-		if err != nil {
-			terror.Ackf(ctx, "logView run: %w", err)
-			cancelChan <- struct{}{}
-		}
-		close(cancelChan)
-	}()
-
-	recvChan := make(chan *pb.ActReply)
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-
-		for {
-			res, err := stream.Recv()
-			if err != nil {
-				if err == io.EOF {
-					span.AddEvent("stream recv EOF")
-					return
-				}
-				terror.Ackf(ctx, "stream recv: %w", err)
-				return
-			}
-
-			span.AddEvent(fmt.Sprintf("stream recv: %v", res))
-			recvChan <- res
-		}
-	}()
-
-	proxy, proxyError := s.startPortForwarder(ctx, &wg)
-	defer func() {
-		if proxyError == nil {
-			terror.Ackf(ctx, "proxy close: %w", proxy.Close())
-		}
-	}()
-
-loop:
-	for {
-		select {
-		case _, ok := <-cancelChan:
-			if !ok {
-				span.AddEvent("done")
-				break loop
-			}
-
-			span.AddEvent("cancel")
-			err = stream.Send(&pb.ActReq{
-				Cancel: true,
-			})
-			if err != nil {
-				logViewProg.Send(tea.QuitMsg{})
-
-				err = terror.Errorf(ctx, "stream send: %w", err)
-				break loop
-			}
-		case r := <-recvChan:
-			if l := r.GetLog(); l != "" {
-				logViewProg.Send(LogMsg{
-					source: r.GetSource(),
-					body:   l,
-				})
-				continue
-			}
-
-			if c := r.GetChoice(); c != nil {
-				logViewProg.Send(tea.QuitMsg{})
-
-				err = terror.Errorf(ctx, "unexpected choice msg")
-			}
-
-			if e := r.GetError(); e != nil {
-				logViewProg.Send(LogMsg{
-					source: r.GetSource(),
-					body:   e.Error,
-				})
-
-				err = terror.Errorf(ctx, "remote error: %s", e.Error)
-			}
-
-			logViewProg.Send(DoneMsg{})
-			break loop
-		}
-	}
-
-	if err := stream.CloseSend(); err != nil {
-		terror.Ackf(ctx, "stream closeSend: %w", err)
-	}
-
-	return
 }
