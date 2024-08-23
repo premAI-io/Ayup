@@ -60,7 +60,7 @@ func confFilePath(ctx context.Context) (string, error) {
 		return "", terror.Errorf(ctx, "os MkdirAll: %w", err)
 	}
 
-	return filepath.Join(confDir, "ayup", "env"), nil
+	return filepath.Join(confDir, "env"), nil
 }
 
 func read(ctx context.Context, path string) (confMap map[string]string, err error) {

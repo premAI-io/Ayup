@@ -385,7 +385,7 @@ func (s *Srv) RunServer(pctx context.Context) (err error) {
 
 	buildkitSpan, buildkitOut := s.runRootlessBuildkit(ctx)
 
-	privKey, err := rpc.EnsurePrivKey(ctx, s.P2pPrivKey)
+	privKey, err := rpc.EnsurePrivKey(ctx, "AYUP_SERVER_P2P_PRIV_KEY", s.P2pPrivKey)
 	if err != nil {
 		return err
 	}

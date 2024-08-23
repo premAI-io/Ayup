@@ -44,7 +44,8 @@ type Globals struct {
 type PushCmd struct {
 	Path string `arg:"" optional:"" name:"path" help:"Path to the source code to be pushed" type:"path"`
 
-	Host string `env:"AYUP_PUSH_HOST" default:"localhost:50051" help:"The location of a service we can push to"`
+	Host       string `env:"AYUP_PUSH_HOST" default:"localhost:50051" help:"The location of a service we can push to"`
+	P2pPrivKey string `env:"AYUP_CLIENT_P2P_PRIV_KEY" help:"Secret encryption key produced by 'ay key new'"`
 }
 
 func (s *PushCmd) Run(g Globals) (err error) {
@@ -52,7 +53,7 @@ func (s *PushCmd) Run(g Globals) (err error) {
 		p := push.Pusher{
 			Tracer:     g.Tracer,
 			Host:       s.Host,
-			P2pPrivKey: cli.P2pPrivKey,
+			P2pPrivKey: s.P2pPrivKey,
 			SrcDir:     s.Path,
 		}
 
@@ -66,6 +67,7 @@ type DaemonStartCmd struct {
 	Host           string `env:"AYUP_DAEMON_HOST" default:":50051" help:"The addresses and port to listen on"`
 	ContainerdAddr string `env:"AYUP_CONTAINERD_ADDR" help:"The path to the containerd socket if not using Docker's" default:"/var/run/docker/containerd/containerd.sock"`
 
+	P2pPrivKey           string `env:"AYUP_SERVER_P2P_PRIV_KEY" help:"The server's private key, generated automatically if not set, also see 'ay key new'"`
 	P2pAuthorizedClients string `env:"AYUP_P2P_AUTHORIZED_CLIENTS" help:"Comma deliminated public keys of logged in clients"`
 }
 
@@ -85,7 +87,7 @@ func (s *DaemonStartCmd) Run(g Globals) (err error) {
 			ImgName:        "docker.io/richardprem/ayup:test",
 			Host:           s.Host,
 			ContainerdAddr: s.ContainerdAddr,
-			P2pPrivKey:     cli.P2pPrivKey,
+			P2pPrivKey:     s.P2pPrivKey,
 		}
 
 		var authedClients []peer.ID
@@ -111,13 +113,14 @@ func (s *DaemonStartCmd) Run(g Globals) (err error) {
 }
 
 type LoginCmd struct {
-	Host string `arg:"" env:"AYUP_LOGIN_HOST" help:"The server's P2P multi-address including the peer ID e.g. /dns4/example.com/50051/p2p/1..."`
+	Host       string `arg:"" env:"AYUP_LOGIN_HOST" help:"The server's P2P multi-address including the peer ID e.g. /dns4/example.com/50051/p2p/1..."`
+	P2pPrivKey string `env:"AYUP_CLIENT_P2P_PRIV_KEY" help:"The client's private key, generated automatically if not set, also see 'ay key new'"`
 }
 
 func (s *LoginCmd) Run(g Globals) error {
 	l := login.Login{
 		Host:       s.Host,
-		P2pPrivKey: cli.P2pPrivKey,
+		P2pPrivKey: s.P2pPrivKey,
 	}
 
 	return l.Run(g.Ctx)
