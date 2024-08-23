@@ -2,14 +2,18 @@ package srv
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
 
+	"go.opentelemetry.io/otel/attribute"
 	tr "go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
 
@@ -19,6 +23,7 @@ import (
 	"github.com/moby/buildkit/client"
 	"github.com/moby/buildkit/client/llb"
 	gateway "github.com/moby/buildkit/frontend/gateway/client"
+	solverPb "github.com/moby/buildkit/solver/pb"
 	"github.com/opencontainers/go-digest"
 
 	// gatewayapi "github.com/moby/buildkit/frontend/gateway/pb"
@@ -61,6 +66,97 @@ func (s *Srv) useDockerfile(ctx context.Context, stream pb.Srv_AnalysisServer) (
 	return true, nil
 }
 
+func execProcess(ctx context.Context, stream pb.Srv_AnalysisServer, ctr gateway.Container, recvChan chan recvReq) error {
+	logWriter := logWriter{ctx: ctx, source: "app", stream: stream}
+
+	pid, err := ctr.Start(ctx, gateway.StartRequest{
+		Cwd: "/app",
+		// TODO: Run the Dockerfile's CMD or entrypoint
+		Args:   []string{"python", "__main__.py"},
+		Tty:    true,
+		Stdout: &logWriter,
+		Stderr: &logWriter,
+	})
+	if err != nil {
+		return terror.Errorf(ctx, "ctr Start: %w", err)
+	}
+
+	waitChan := make(chan error)
+
+	go func() {
+		if err := pid.Wait(); err != nil {
+			waitChan <- terror.Errorf(ctx, "pid Wait: %w", err)
+		} else {
+			waitChan <- nil
+		}
+	}()
+
+	cancelCount := 0
+
+	for {
+		select {
+		case err := <-waitChan:
+			if err != nil {
+				return err
+			}
+			return nil
+		case req := <-recvChan:
+			trace.Event(ctx, "Got user request")
+
+			if req.err != nil {
+				return req.err
+			}
+			if req.req.GetCancel() {
+				trace.Event(ctx, "Got cancel", attribute.Int("count", cancelCount))
+
+				switch cancelCount {
+				case 0:
+					if err := pid.Signal(ctx, syscall.SIGTERM); err != nil {
+						return terror.Errorf(ctx, "pid Signal: %w", err)
+					}
+				case 1:
+					if err := pid.Signal(ctx, syscall.SIGKILL); err != nil {
+						return terror.Errorf(ctx, "pid Signal: %w", err)
+					}
+				default:
+					return terror.Errorf(ctx, "more than 2 cancel attempts")
+				}
+				cancelCount += 1
+			} else {
+				return terror.Errorf(ctx, "Unexpected message")
+			}
+		}
+	}
+}
+
+type logWriter struct {
+	ctx    context.Context
+	source string
+	stream pb.Srv_AnalysisServer
+}
+
+func (s *logWriter) Write(p []byte) (int, error) {
+	// TODO: limit size?
+	p = bytes.TrimRight(p, "\n")
+	for _, line := range bytes.Split(p, []byte{'\n'}) {
+		if err := s.stream.Send(&pb.ActReply{
+			Source: s.source,
+			Variant: &pb.ActReply_Log{
+				Log: string(line),
+			},
+		}); err != nil {
+			return 0, terror.Errorf(s.ctx, "stream Send: %w", err)
+		}
+	}
+	return len(p), nil
+}
+
+func (s *logWriter) Close() error {
+	return nil
+}
+
+var ErrUserCancelled = errors.New("user cancelled")
+
 func (s *Srv) Analysis(stream pb.Srv_AnalysisServer) error {
 	ctx := stream.Context()
 	span := tr.SpanFromContext(ctx)
@@ -69,7 +165,34 @@ func (s *Srv) Analysis(stream pb.Srv_AnalysisServer) error {
 	sendError := mkSendError(ctx, stream)
 	internalError := mkInternalError(ctx, stream)
 
-	recvChan := mkRecvChan(ctx, stream)
+	recvChan := make(chan recvReq)
+
+	proxy := mkProxy()
+	go func() {
+		if err := proxy.Listen(":8080"); err != nil {
+			terror.Ackf(ctx, "proxy listen: %w", err)
+		}
+	}()
+	defer func() {
+		if err := proxy.ShutdownWithContext(ctx); err != nil {
+			terror.Ackf(ctx, "proxy shutdown: %w", err)
+		}
+	}()
+
+	go func(ctx context.Context) {
+		for {
+			req, err := stream.Recv()
+			if err != nil && err != io.EOF {
+				err = terror.Errorf(ctx, "stream recv: %w", err)
+			}
+
+			recvChan <- recvReq{req, err}
+
+			if err == io.EOF {
+				break
+			}
+		}
+	}(ctx)
 
 	if ok, err := s.checkPeerAuth(ctx); !ok || err != nil {
 		if err != nil {
@@ -107,27 +230,71 @@ func (s *Srv) Analysis(stream pb.Srv_AnalysisServer) error {
 		if err != nil {
 			return err
 		}
-		ctx, span := trace.Span(ctx, "buildctl")
+		ctx, span := trace.Span(ctx, "dockerfile")
 		defer span.End()
 
-		procWait := mkProcWaiter(ctx, stream, recvChan)
+		internalError := mkInternalError(ctx, stream)
 
-		cmd := exec.Command(
-			"buildctl",
-			"--addr", s.BuildkitdAddr,
-			"build",
-			"--frontend=dockerfile.v0",
-			"--output", fmt.Sprintf("type=image,name=%s", s.ImgName),
-			"--local", fmt.Sprintf("context=%s", s.SrcDir),
-			"--local", fmt.Sprintf("dockerfile=%s", s.SrcDir),
-		)
+		b := func(ctx context.Context, c gateway.Client) (*gateway.Result, error) {
+			r, err := c.Solve(ctx, gateway.SolveRequest{
+				Frontend: "dockerfile.v0",
+			})
+			if err != nil {
+				return nil, internalError("gateway client solve: %w", err)
+			}
 
-		in, out := startProc(ctx, cmd)
+			ctr, err := c.NewContainer(ctx, gateway.NewContainerRequest{
+				Mounts: []gateway.Mount{
+					{
+						Dest:      "/",
+						MountType: solverPb.MountType_BIND,
+						Ref:       r.Ref,
+					},
+				},
+			})
+			if err != nil {
+				return nil, internalError("gateway client NewContainer: %w", err)
+			}
+			defer func() { terror.Ackf(ctx, "ctr Release: %w", ctr.Release(ctx)) }()
 
-		return procWait("buildctl", in, out)
+			if err := execProcess(ctx, stream, ctr, recvChan); err != nil {
+				return nil, err
+			}
+
+			return r, nil
+		}
+
+		contextFS, err := fsutil.NewFS(s.SrcDir)
+		if err != nil {
+			return internalError("fsutil newfs: %w", err)
+		}
+
+		statusChan := buildkitStatusSender(ctx, stream)
+		if _, err := c.Build(ctx, client.SolveOpt{
+			LocalMounts: map[string]fsutil.FS{
+				"dockerfile": contextFS,
+				"context":    contextFS,
+			},
+		}, "ayup", b, statusChan); err != nil {
+			return internalError("build: %w", err)
+		}
+
+		if err := stream.Send(&pb.ActReply{
+			Variant: &pb.ActReply_AnalysisResult{
+				AnalysisResult: &pb.AnalysisResult{
+					UseDockerfile: true,
+				},
+			},
+		}); err != nil {
+			return terror.Errorf(ctx, "stream Send: %w", err)
+		}
+
+		return nil
 	} else if _, err := os.Stat(requirements_path); err != nil {
 		ctx, span := trace.Span(ctx, "requirements")
 		defer span.End()
+
+		internalError := mkInternalError(ctx, stream)
 
 		if !os.IsNotExist(err) {
 			return internalError("stat requirements.txt: %w", err)
@@ -227,6 +394,8 @@ func (s *Srv) Analysis(stream pb.Srv_AnalysisServer) error {
 		}, "ayup", b, statusChan); err != nil {
 			return internalError("build: %w", err)
 		}
+
+		span.End()
 	} else {
 		span.AddEvent("requirements.txt exists")
 
@@ -285,6 +454,24 @@ func (s *Srv) Analysis(stream pb.Srv_AnalysisServer) error {
 				return nil, internalError("client solve: %w", err)
 			}
 
+			ctr, err := c.NewContainer(ctx, gateway.NewContainerRequest{
+				Mounts: []gateway.Mount{
+					{
+						Dest:      "/",
+						MountType: solverPb.MountType_BIND,
+						Ref:       r.Ref,
+					},
+				},
+			})
+			if err != nil {
+				return nil, internalError("gateway client NewContainer: %w", err)
+			}
+			defer func() { terror.Ackf(ctx, "ctr Release: %w", ctr.Release(ctx)) }()
+
+			if err := execProcess(ctx, stream, ctr, recvChan); err != nil {
+				return nil, err
+			}
+
 			return r, nil
 		}
 
@@ -295,17 +482,6 @@ func (s *Srv) Analysis(stream pb.Srv_AnalysisServer) error {
 		}
 
 		_, err = c.Build(ctx, client.SolveOpt{
-			Exports: []client.ExportEntry{
-				{
-					Type: client.ExporterImage,
-					Attrs: map[string]string{
-						"name":        s.ImgName,
-						"push":        "false",
-						"unpack":      "false",
-						"compression": "uncompressed",
-					},
-				},
-			},
 			LocalMounts: map[string]fsutil.FS{
 				"context": contextFS,
 			},

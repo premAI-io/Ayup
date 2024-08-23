@@ -9,8 +9,6 @@ package srv;
 service Srv {
     rpc Sync(stream FileChunks) returns (Result);
     rpc Analysis(stream ActReq) returns (stream ActReply);
-    rpc Build(stream ActReq) returns (stream ActReply);
-    rpc Run(stream ActReq) returns (stream ActReply);
     rpc Login(LoginReq) returns (LoginReply);
     rpc Forward(stream ForwardRequest) returns (stream ForwardResponse);
 }
