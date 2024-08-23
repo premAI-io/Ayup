@@ -30,7 +30,7 @@ import (
 
 const Libp2pProtocol = protocol.ID("/ayup/grpc/1.0.0")
 
-func EnsurePrivKey(ctx context.Context, b64PrivKey string) (privKey crypto.PrivKey, err error) {
+func EnsurePrivKey(ctx context.Context, confName string, b64PrivKey string) (privKey crypto.PrivKey, err error) {
 	if b64PrivKey == "" {
 		ptrace.Event(ctx, "creating private key")
 
@@ -45,7 +45,7 @@ func EnsurePrivKey(ctx context.Context, b64PrivKey string) (privKey crypto.PrivK
 		}
 
 		b64Key := base64.StdEncoding.EncodeToString(pbPrivKey)
-		_ = conf.Set(ctx, "AYUP_P2P_PRIV_KEY", b64Key)
+		_ = conf.Set(ctx, confName, b64Key)
 	} else {
 		privKeyPb, err := base64.StdEncoding.DecodeString(b64PrivKey)
 		if err != nil {

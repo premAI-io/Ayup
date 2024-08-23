@@ -22,7 +22,7 @@ func (s *Login) Run(pctx context.Context) error {
 	ctx, span := trace.Span(pctx, "login")
 	defer span.End()
 
-	privKey, err := rpc.EnsurePrivKey(ctx, s.P2pPrivKey)
+	privKey, err := rpc.EnsurePrivKey(ctx, "AYUP_CLIENT_P2P_PRIV_KEY", s.P2pPrivKey)
 	if err != nil {
 		return err
 	}
