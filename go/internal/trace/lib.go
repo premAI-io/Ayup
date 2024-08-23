@@ -22,7 +22,7 @@ import (
 
 // setupOTelSDK bootstraps the OpenTelemetry pipeline.
 // If it does not return an error, make sure to call shutdown for proper cleanup.
-func SetupOTelSDK(ctx context.Context, endpoint string) (shutdown func(context.Context) error, err error) {
+func SetupOTelSDK(ctx context.Context) (shutdown func(context.Context) error, err error) {
 	var shutdownFuncs []func(context.Context) error
 
 	// shutdown calls cleanup functions registered via shutdownFuncs.
@@ -37,10 +37,6 @@ func SetupOTelSDK(ctx context.Context, endpoint string) (shutdown func(context.C
 		return err
 	}
 
-	if endpoint == "" {
-		return shutdown, nil
-	}
-
 	// handleErr calls shutdown for cleanup and makes sure that all errors are returned.
 	handleErr := func(inErr error) {
 		err = errors.Join(inErr, shutdown(ctx))
@@ -51,7 +47,7 @@ func SetupOTelSDK(ctx context.Context, endpoint string) (shutdown func(context.C
 	otel.SetTextMapPropagator(prop)
 
 	// Set up trace provider.
-	tracerProvider, err := newTraceProvider(ctx, endpoint)
+	tracerProvider, err := newTraceProvider(ctx)
 	if err != nil {
 		handleErr(err)
 		return
@@ -78,11 +74,8 @@ func newPropagator() propagation.TextMapPropagator {
 	)
 }
 
-func newTraceProvider(ctx context.Context, endpoint string) (*trace.TracerProvider, error) {
-	traceExporter, err := otlptracegrpc.New(ctx,
-		otlptracegrpc.WithInsecure(),
-		otlptracegrpc.WithEndpoint(endpoint),
-	)
+func newTraceProvider(ctx context.Context) (*trace.TracerProvider, error) {
+	traceExporter, err := otlptracegrpc.New(ctx)
 	if err != nil {
 		return nil, err
 	}
