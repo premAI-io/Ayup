@@ -111,10 +111,15 @@ func execProcess(ctx context.Context, stream pb.Srv_AnalysisServer, ctr gateway.
 
 				switch cancelCount {
 				case 0:
-					if err := pid.Signal(ctx, syscall.SIGTERM); err != nil {
+					if err := pid.Signal(ctx, syscall.SIGINT); err != nil {
 						return terror.Errorf(ctx, "pid Signal: %w", err)
 					}
 				case 1:
+					if err := pid.Signal(ctx, syscall.SIGTERM); err != nil {
+						return terror.Errorf(ctx, "pid Signal: %w", err)
+					}
+
+				case 2:
 					if err := pid.Signal(ctx, syscall.SIGKILL); err != nil {
 						return terror.Errorf(ctx, "pid Signal: %w", err)
 					}
