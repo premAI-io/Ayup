@@ -135,14 +135,25 @@ type logWriter struct {
 	stream pb.Srv_AnalysisServer
 }
 
+func byteToIntSlice(bs []byte) []int {
+	ints := make([]int, len(bs))
+
+	for i, b := range bs {
+		ints[i] = int(b)
+	}
+
+	return ints
+}
+
 func (s *logWriter) Write(p []byte) (int, error) {
 	// TODO: limit size?
 	p = bytes.TrimRight(p, "\n")
 	for _, line := range bytes.Split(p, []byte{'\n'}) {
+		trace.Event(s.ctx, "log write", attribute.IntSlice("bytes", byteToIntSlice(line)))
 		if err := s.stream.Send(&pb.ActReply{
 			Source: s.source,
 			Variant: &pb.ActReply_Log{
-				Log: string(line),
+				Log: string(bytes.TrimRight(line, "\v\f\r")),
 			},
 		}); err != nil {
 			return 0, terror.Errorf(s.ctx, "stream Send: %w", err)
