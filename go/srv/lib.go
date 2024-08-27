@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"sync"
+	"syscall"
 
 	gostream "github.com/libp2p/go-libp2p-gostream"
 	p2pPeer "github.com/libp2p/go-libp2p/core/peer"
@@ -302,6 +304,9 @@ func (s *Srv) RunServer(pctx context.Context) (err error) {
 	ctx, span := trace.Span(ctx, "start srv")
 	defer span.End()
 
+	ctx, stopSigFunc := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
+	defer stopSigFunc()
+
 	buildkitSpan, buildkitOut := s.runRootlessBuildkit(ctx)
 
 	privKey, err := rpc.EnsurePrivKey(ctx, "AYUP_SERVER_P2P_PRIV_KEY", s.P2pPrivKey)
@@ -344,9 +349,14 @@ func (s *Srv) RunServer(pctx context.Context) (err error) {
 	)
 	pb.RegisterSrvServer(srv, s)
 	span.AddEvent("Listening")
-	span.End()
 
+	var wg sync.WaitGroup
+	defer wg.Wait()
+
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
+
 		for pout := range buildkitOut {
 			if pout.err != nil || pout.ret != nil {
 				s.tuiMutex.Lock()
@@ -361,10 +371,16 @@ func (s *Srv) RunServer(pctx context.Context) (err error) {
 		}
 
 		buildkitSpan.End()
+		stopSigFunc()
+	}()
+
+	go func() {
+		<-ctx.Done()
 		srv.GracefulStop()
 	}()
 
 	if err := srv.Serve(lis); err != nil {
+		stopSigFunc()
 		return terror.Errorf(ctx, "serve: %w", err)
 	}
 
