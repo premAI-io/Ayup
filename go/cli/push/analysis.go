@@ -214,7 +214,7 @@ func (s AnalysisView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (s AnalysisView) View() string {
 	if s.done {
-		return fmt.Sprintf("%s\n\n", s.hist.String())
+		return fmt.Sprintf("%s\n", s.hist.String())
 	}
 
 	if s.choice != nil {
