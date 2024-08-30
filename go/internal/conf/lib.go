@@ -53,6 +53,10 @@ func UserConfigDir() string {
 	return "/etc/ayup"
 }
 
+func InrootlessAddr() string {
+	return filepath.Join(UserRuntimeDir(), "rootless.sock")
+}
+
 func confFilePath(ctx context.Context) (string, error) {
 	confDir := UserConfigDir()
 
