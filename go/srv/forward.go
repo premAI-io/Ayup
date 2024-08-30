@@ -3,13 +3,14 @@ package srv
 import (
 	"fmt"
 	"io"
-	"net"
 	"strings"
 
 	"github.com/gofiber/contrib/otelfiber"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/proxy"
+	"golang.org/x/sync/errgroup"
 
+	inrPb "premai.io/Ayup/go/internal/grpc/inrootless"
 	pb "premai.io/Ayup/go/internal/grpc/srv"
 	"premai.io/Ayup/go/internal/terror"
 	"premai.io/Ayup/go/internal/trace"
@@ -34,96 +35,76 @@ func mkProxy() *fiber.App {
 }
 
 func (s *Srv) Forward(stream pb.Srv_ForwardServer) error {
-	genericError := fmt.Errorf("port forwarding failure")
 	ctx := stream.Context()
-	conn, err := net.Dial("tcp", "127.0.0.1:5000")
+	genericError := fmt.Errorf("port forwarding failure")
+
+	inrStream, err := s.inrClient.Forward(ctx)
 	if err != nil {
-		terror.Ackf(ctx, "net dial: %w", err)
+		terror.Ackf(ctx, "inrClient Forward: %w", err)
 		return genericError
 	}
-	defer func() { terror.Ackf(ctx, "conn close: %w", conn.Close()) }()
-	trace.Event(ctx, "connected to port 5000")
 
-	doneChan := make(chan error)
+	var g errgroup.Group
 
-	ingress := func() {
+	g.Go(func() error {
 		for {
 			req, err := stream.Recv()
 			if err != nil {
 				if err != io.EOF {
 					terror.Ackf(ctx, "stream recv: %w", err)
-					doneChan <- genericError
+					return genericError
 				} else {
 					trace.Event(ctx, "ingress done")
-					doneChan <- nil
+					return nil
 				}
-				break
+			}
+
+			if err := inrStream.Send(&inrPb.ForwardRequest{
+				Data: req.Data,
+			}); err != nil {
+				terror.Ackf(ctx, "inrStream Send: %w", err)
+				return genericError
 			}
 
 			trace.Event(ctx, "ingress recv")
-
-			if _, err := conn.Write(req.Data); err != nil {
-				terror.Ackf(ctx, "conn write: %w", err)
-				doneChan <- genericError
-				return
-			}
-
-			trace.Event(ctx, "ingress write")
 		}
+	})
 
-		terror.Ackf(ctx, "conn close: %w", conn.Close())
-	}
-
-	egress := func() {
-		buf := make([]byte, 16*1024)
+	g.Go(func() error {
 		for {
-			len, err := conn.Read(buf)
+			req, err := inrStream.Recv()
 			if err != nil {
 				if err != io.EOF {
-					terror.Ackf(ctx, "conn read: %w", err)
-					doneChan <- genericError
-					break
+					terror.Ackf(ctx, "stream recv: %w", err)
+					return genericError
+				} else {
+					trace.Event(ctx, "ingress done")
+					return nil
 				}
+			}
 
+			if req.Closed {
 				if err := stream.Send(&pb.ForwardResponse{
 					Closed: true,
 				}); err != nil {
 					terror.Ackf(ctx, "stream send: %w", err)
+					return genericError
 				}
-
-				trace.Event(ctx, "egress done")
-				doneChan <- nil
 				break
 			}
-
-			trace.Event(ctx, "egress read")
 
 			if err := stream.Send(&pb.ForwardResponse{
-				Data: buf[:len],
+				Data: req.Data,
 			}); err != nil {
-				terror.Ackf(ctx, "stream send: %w", err)
-				doneChan <- genericError
-				break
+				terror.Ackf(ctx, "inrStream Send: %w", err)
+				return genericError
 			}
 
-			trace.Event(ctx, "egress send")
-		}
-	}
-
-	go ingress()
-	go egress()
-
-	doneCount := 0
-	for chanErr := range doneChan {
-		if err == nil {
-			err = chanErr
+			trace.Event(ctx, "ingress recv")
 		}
 
-		doneCount += 1
-		if doneCount > 1 {
-			break
-		}
-	}
+		return nil
+	})
 
-	return err
+	return g.Wait()
 }

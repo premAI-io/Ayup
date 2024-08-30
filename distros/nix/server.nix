@@ -1,8 +1,8 @@
 {
-    lib, stdenv, makeWrapper, version, buildkit, nerdctl, cli
+    lib, stdenv, makeWrapper, version, buildkit, cli
 }:
 let
-    runtimeDeps = [ buildkit nerdctl ];
+    runtimeDeps = [ buildkit ];
 in
     stdenv.mkDerivation {
         pname = "ayup-server";

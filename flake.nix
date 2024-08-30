@@ -11,10 +11,13 @@
       pkgs = import nixpkgs {
         inherit system;
       };
+      buildkit-cni-plugins = pkgs.callPackage ./distros/nix/buildkit-cni.nix {};
       buildkitDevPkgs = with pkgs; [
           slirp4netns
           rootlesskit
           runc
+          cni
+          buildkit-cni-plugins
           buildkit
           nerdctl
       ];
@@ -33,7 +36,7 @@
           inherit version;
           dontPatchShebangs = true;
       };
-      vendorHash = "sha256-9TAiBMxaMJSOS8qEMdVp3N9me8t32mIf3b0jNT0hhEc="; #pkgs.lib.fakeHash;
+      vendorHash = "sha256-xMcNsYkTAmjCUkvgDuCFSbNqO4DBBocLSGIPh2Awf/4="; #pkgs.lib.fakeHash;
       cli = pkgs.callPackage ./distros/nix/cli.nix {
         inherit version vendorHash;
       };

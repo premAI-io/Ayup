@@ -1,0 +1,25 @@
+// The protocol between the server daemon and a buildkitd wrapper running inside the rootlesskit
+// namespace
+
+syntax = "proto3";
+
+option go_package = "premai.io/Ayup/go/pkg/grpc/inrootless";
+
+package inrootless;
+
+service InRootless {
+    rpc Ping(PingRequest) returns (PingResponse);
+    rpc Forward(stream ForwardRequest) returns (stream ForwardResponse);
+}
+
+message PingRequest {}
+message PingResponse {}
+
+message ForwardRequest {
+    bytes data = 1;
+}
+
+message ForwardResponse {
+    bytes data = 1;
+    bool closed = 2;
+}

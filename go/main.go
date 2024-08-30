@@ -26,6 +26,7 @@ import (
 	"premai.io/Ayup/go/cli/key"
 	"premai.io/Ayup/go/cli/login"
 	"premai.io/Ayup/go/cli/push"
+	"premai.io/Ayup/go/inrootless"
 	"premai.io/Ayup/go/internal/terror"
 	ayTrace "premai.io/Ayup/go/internal/trace"
 	"premai.io/Ayup/go/internal/tui"
@@ -112,6 +113,18 @@ func (s *DaemonStartCmd) Run(g Globals) (err error) {
 	return
 }
 
+type DaemonStartInRootlessCmd struct {
+	BuildkitArgs []string `arg:"" help:"Buildkitd's arguments"`
+}
+
+func (s *DaemonStartInRootlessCmd) Run(g Globals) (err error) {
+	pprof.Do(g.Ctx, pprof.Labels("command", "daemon startinrootless"), func(ctx context.Context) {
+		err = inrootless.RunServer(ctx, s.BuildkitArgs)
+	})
+
+	return
+}
+
 type LoginCmd struct {
 	Host       string `arg:"" env:"AYUP_LOGIN_HOST" help:"The server's P2P multi-address including the peer ID e.g. /dns4/example.com/50051/p2p/1..."`
 	P2pPrivKey string `env:"AYUP_CLIENT_P2P_PRIV_KEY" help:"The client's private key, generated automatically if not set, also see 'ay key new'"`
@@ -134,10 +147,11 @@ func (s *KeyNewCmd) Run(g Globals) error {
 
 var cli struct {
 	Push  PushCmd  `cmd:"" help:"Figure out how to deploy your application"`
-	Login LoginCmd `cmd:"" help:"Login to the Ayup service" hidden:""`
+	Login LoginCmd `cmd:"" help:"Login to the Ayup service"`
 
 	Daemon struct {
-		Start DaemonStartCmd `cmd:"" help:"Start an Ayup service Daemon"`
+		Start           DaemonStartCmd           `cmd:"" help:"Start an Ayup service Daemon"`
+		StartInRootless DaemonStartInRootlessCmd `cmd:"" passthrough:"" help:"Start a utility daemon to do tasks such as port forwarding in the Rootlesskit namesapce" hidden:""`
 	} `cmd:"" help:"Self host Ayup"`
 
 	Key struct {

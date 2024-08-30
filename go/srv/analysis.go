@@ -73,7 +73,7 @@ func execProcess(ctx context.Context, stream pb.Srv_AnalysisServer, ctr gateway.
 		Cwd: "/app",
 		// TODO: Run the Dockerfile's CMD or entrypoint
 		Args:   []string{"python", "__main__.py"},
-		Tty:    true,
+		Tty:    false,
 		Stdout: &logWriter,
 		Stderr: &logWriter,
 	})
@@ -124,7 +124,7 @@ func execProcess(ctx context.Context, stream pb.Srv_AnalysisServer, ctr gateway.
 						return terror.Errorf(ctx, "pid Signal: %w", err)
 					}
 				default:
-					return terror.Errorf(ctx, "more than 2 cancel attempts")
+					return terror.Errorf(ctx, "more than 3 cancel attempts")
 				}
 				cancelCount += 1
 			} else {
@@ -471,6 +471,7 @@ func (s *Srv) Analysis(stream pb.Srv_AnalysisServer) error {
 			}
 
 			ctr, err := c.NewContainer(ctx, gateway.NewContainerRequest{
+				Hostname: "app",
 				Mounts: []gateway.Mount{
 					{
 						Dest:      "/",

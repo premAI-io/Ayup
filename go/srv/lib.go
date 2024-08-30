@@ -1,7 +1,6 @@
 package srv
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"os"
@@ -15,10 +14,14 @@ import (
 	p2pPeer "github.com/libp2p/go-libp2p/core/peer"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/peer"
 
 	"premai.io/Ayup/go/internal/conf"
+	inrPb "premai.io/Ayup/go/internal/grpc/inrootless"
 	pb "premai.io/Ayup/go/internal/grpc/srv"
+
+	"premai.io/Ayup/go/internal/proc"
 	"premai.io/Ayup/go/internal/rpc"
 	"premai.io/Ayup/go/internal/terror"
 	"premai.io/Ayup/go/internal/trace"
@@ -47,6 +50,8 @@ type Srv struct {
 
 	ContainerdAddr string
 	BuildkitdAddr  string
+
+	inrClient inrPb.InRootlessClient
 
 	// Instance of a push, here while we don't have apps, users, sessions etc.
 	push Push
@@ -89,137 +94,6 @@ func mkInternalError(ctx context.Context, stream ActServer) func(string, ...any)
 type recvReq struct {
 	req *pb.ActReq
 	err error
-}
-
-type procOut struct {
-	err error
-	ret *int
-}
-
-type procIn struct {
-	cancel bool
-	stdio  []byte
-}
-
-func startProc(ctx context.Context, cmd *exec.Cmd) (chan<- procIn, <-chan procOut) {
-	span := tr.SpanFromContext(ctx)
-	procInChan := make(chan procIn, 1)
-	procOutChan := make(chan procOut, 1)
-
-	errOut := func(err error) (chan<- procIn, <-chan procOut) {
-		procOutChan <- procOut{
-			err: err,
-		}
-
-		close(procOutChan)
-
-		return procInChan, procOutChan
-	}
-
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		return errOut(terror.Errorf(ctx, "stdin pipe: %w", err))
-	}
-
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return errOut(terror.Errorf(ctx, "stdout pipe: %w", err))
-	}
-	outreader := bufio.NewReader(stdout)
-
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return errOut(terror.Errorf(ctx, "stderr pipe: %w", err))
-	}
-	errreader := bufio.NewReader(stderr)
-
-	var wg sync.WaitGroup
-	wg.Add(2)
-
-	readOut := func(ctx context.Context, reader *bufio.Reader) {
-		defer wg.Done()
-
-		scanner := bufio.NewScanner(reader)
-
-		for scanner.Scan() {
-			text := scanner.Text()
-			span.AddEvent("log", tr.WithAttributes(attr.String("text", text)))
-		}
-	}
-
-	go readOut(ctx, outreader)
-	go readOut(ctx, errreader)
-
-	err = cmd.Start()
-	if err != nil {
-		return errOut(terror.Errorf(ctx, "cmd start: %w", err))
-	}
-
-	procDone := make(chan struct{})
-
-	go func() {
-		defer close(procOutChan)
-
-		go func(ctx context.Context) {
-			err = cmd.Wait()
-			exitCode := 0
-			if err != nil {
-				if exitError, ok := err.(*exec.ExitError); ok {
-					exitCode = exitError.ExitCode()
-				}
-				err = terror.Errorf(ctx, "cmd wait: %w", err)
-			}
-
-			// send the logs before the exit code
-			wg.Wait()
-			procOutChan <- procOut{
-				err: err,
-				ret: &exitCode,
-			}
-			close(procDone)
-		}(ctx)
-
-		termProc := func() {
-			if cmd.Process == nil {
-				return
-			}
-
-			if err := cmd.Process.Signal(os.Interrupt); err != nil {
-				_ = terror.Errorf(ctx, "signal interrupt: %w", err)
-			}
-		}
-
-		span.AddEvent("Started proc")
-	loop:
-		for {
-			select {
-			case r := <-procInChan:
-				if r.cancel {
-					termProc()
-				} else if r.stdio != nil {
-					if _, err := stdin.Write(r.stdio); err != nil {
-						procOutChan <- procOut{
-							err: terror.Errorf(ctx, "stdin write: %w", err),
-						}
-						termProc()
-					}
-
-					if err := stdin.Close(); err != nil {
-						procOutChan <- procOut{
-							err: terror.Errorf(ctx, "stdin close: %w", err),
-						}
-						termProc()
-					}
-				}
-			case <-ctx.Done():
-				termProc()
-			case <-procDone:
-				break loop
-			}
-		}
-	}()
-
-	return procInChan, procOutChan
 }
 
 func remotePeerId(ctx context.Context) (peerId p2pPeer.ID, err error) {
@@ -273,19 +147,26 @@ func (s *Srv) checkPeerAuth(ctx context.Context) (bool, error) {
 	return false, nil
 }
 
-func (s *Srv) runRootlessBuildkit(ctx context.Context) (tr.Span, <-chan procOut) {
+func (s *Srv) runRootlessBuildkit(ctx context.Context, selfExe string) (tr.Span, chan<- proc.In, <-chan proc.Out) {
 	ctx, span := trace.Span(ctx, "start buildkit")
 
 	s.BuildkitdAddr = "unix://" + filepath.Join(conf.UserRuntimeDir(), "buildkit", "buildkit.sock")
 
 	cmdArgs := []string{
 		"--port-driver=builtin",
-		"--publish=127.0.0.1:5000:5000/tcp",
 		"--net=slirp4netns",
 		"--copy-up=/etc",
+		// TODO: Could be better handled in upstream change to buildkit
+		"--copy-up=/var/lib/cni",
 		"--disable-host-loopback",
+		"--detach-netns",
 
-		"buildkitd",
+		selfExe, "daemon", "start-in-rootless",
+
+		"--debug",
+		"--rootless",
+		"--oci-worker-rootless=true",
+		"--oci-worker-net=bridge",
 		"--containerd-worker=false",
 		"--config", filepath.Join(conf.UserConfigDir(), "buildkit", "buildkitd.toml"),
 		"--root", filepath.Join(conf.UserRoot(), "buildkit"),
@@ -294,9 +175,9 @@ func (s *Srv) runRootlessBuildkit(ctx context.Context) (tr.Span, <-chan procOut)
 
 	cmd := exec.Command("rootlesskit", cmdArgs...)
 
-	_, po := startProc(ctx, cmd)
+	pi, po := proc.Start(ctx, cmd)
 
-	return span, po
+	return span, pi, po
 }
 
 func (s *Srv) RunServer(pctx context.Context) (err error) {
@@ -307,7 +188,12 @@ func (s *Srv) RunServer(pctx context.Context) (err error) {
 	ctx, stopSigFunc := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stopSigFunc()
 
-	buildkitSpan, buildkitOut := s.runRootlessBuildkit(ctx)
+	selfExe, err := os.Executable()
+	if err != nil {
+		return terror.Errorf(ctx, "os Executable: %w", err)
+	}
+
+	buildkitSpan, _, buildkitOut := s.runRootlessBuildkit(ctx, selfExe)
 
 	privKey, err := rpc.EnsurePrivKey(ctx, "AYUP_SERVER_P2P_PRIV_KEY", s.P2pPrivKey)
 	if err != nil {
@@ -350,6 +236,21 @@ func (s *Srv) RunServer(pctx context.Context) (err error) {
 	pb.RegisterSrvServer(srv, s)
 	span.AddEvent("Listening")
 
+	inrConn, err := grpc.NewClient("unix://"+conf.InrootlessAddr(),
+		grpc.WithStatsHandler(
+			otelgrpc.NewClientHandler(
+				otelgrpc.WithTracerProvider(span.TracerProvider()),
+				otelgrpc.WithMessageEvents(otelgrpc.ReceivedEvents, otelgrpc.SentEvents),
+			),
+		),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		return terror.Errorf(ctx, "grpc NewClient: %w", err)
+	}
+
+	s.inrClient = inrPb.NewInRootlessClient(inrConn)
+
 	var wg sync.WaitGroup
 	defer wg.Wait()
 
@@ -358,14 +259,9 @@ func (s *Srv) RunServer(pctx context.Context) (err error) {
 		defer wg.Done()
 
 		for pout := range buildkitOut {
-			if pout.err != nil || pout.ret != nil {
+			if pout.Err != nil {
 				s.tuiMutex.Lock()
-				if pout.err != nil {
-					fmt.Println(tui.ErrorStyle.Render("Buildkitd Error!"), pout.err)
-				}
-				if pout.ret != nil {
-					fmt.Println(tui.TitleStyle.Render("Buildkit exited:"), *pout.ret)
-				}
+				fmt.Println(tui.ErrorStyle.Render("Buildkitd Error!"), pout.Err)
 				s.tuiMutex.Unlock()
 			}
 		}
@@ -374,8 +270,13 @@ func (s *Srv) RunServer(pctx context.Context) (err error) {
 		stopSigFunc()
 	}()
 
+	if _, err := s.inrClient.Ping(ctx, &inrPb.PingRequest{}, grpc.WaitForReady(true)); err != nil {
+		return terror.Errorf(ctx, "inrClient Ping: %w", err)
+	}
+
 	go func() {
 		<-ctx.Done()
+
 		srv.GracefulStop()
 	}()
 
