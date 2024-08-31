@@ -11,6 +11,7 @@ import (
 
 	"github.com/libp2p/go-libp2p/core/peer"
 	"premai.io/Ayup/go/inrootless"
+	"premai.io/Ayup/go/internal/conf"
 	"premai.io/Ayup/go/internal/terror"
 	"premai.io/Ayup/go/srv"
 )
@@ -29,6 +30,12 @@ func (s *DaemonStartCmd) Run(g Globals) (err error) {
 		tmp, err = os.MkdirTemp("", "ayup-*")
 		if err != nil {
 			err = terror.Errorf(g.Ctx, "MkdirTemp: %w", err)
+			return
+		}
+
+		err = os.MkdirAll(conf.UserRuntimeDir(), 0770)
+		if err != nil {
+			err = terror.Errorf(g.Ctx, "MkdirAll: %w", err)
 			return
 		}
 
