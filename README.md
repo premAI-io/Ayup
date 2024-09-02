@@ -28,7 +28,6 @@ Ayup is in the early stages of production. Some of the things that have been don
 - [x] Quick source upload
 - [x] Build and serve Python applications of a particular form
 - [x] Port forwarding to client with fixed ports
-- [x] Containerd support (allows instant loading of containers and future k8s support)
 - [x] Subdomain routing
 - [x] Build and run applications with a Dockerfile
 - [x] Secure server login and connection

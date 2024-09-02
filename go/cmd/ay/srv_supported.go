@@ -17,8 +17,7 @@ import (
 )
 
 type DaemonStartCmd struct {
-	Host           string `env:"AYUP_DAEMON_HOST" default:":50051" help:"The addresses and port to listen on"`
-	ContainerdAddr string `env:"AYUP_CONTAINERD_ADDR" help:"The path to the containerd socket if not using Docker's" default:"/var/run/docker/containerd/containerd.sock"`
+	Host string `env:"AYUP_DAEMON_HOST" default:":50051" help:"The addresses and port to listen on"`
 
 	P2pPrivKey           string `env:"AYUP_SERVER_P2P_PRIV_KEY" help:"The server's private key, generated automatically if not set, also see 'ay key new'"`
 	P2pAuthorizedClients string `env:"AYUP_P2P_AUTHORIZED_CLIENTS" help:"Comma deliminated public keys of logged in clients"`
@@ -40,13 +39,9 @@ func (s *DaemonStartCmd) Run(g Globals) (err error) {
 		}
 
 		r := srv.Srv{
-			TmpDir:         tmp,
-			SrcDir:         filepath.Join(tmp, "src"),
-			ImgTarPath:     filepath.Join(tmp, "image.tar"),
-			ImgName:        "docker.io/richardprem/ayup:test",
-			Host:           s.Host,
-			ContainerdAddr: s.ContainerdAddr,
-			P2pPrivKey:     s.P2pPrivKey,
+			SrcDir:     filepath.Join(tmp, "src"),
+			Host:       s.Host,
+			P2pPrivKey: s.P2pPrivKey,
 		}
 
 		var authedClients []peer.ID

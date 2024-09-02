@@ -39,17 +39,13 @@ type Push struct {
 type Srv struct {
 	pb.UnimplementedSrvServer
 
-	TmpDir     string
-	SrcDir     string
-	ImgTarPath string
-	ImgName    string
+	SrcDir string
 
 	Host             string
 	P2pPrivKey       string
 	P2pAuthedClients []p2pPeer.ID
 
-	ContainerdAddr string
-	BuildkitdAddr  string
+	BuildkitdAddr string
 
 	inrClient inrPb.InRootlessClient
 
