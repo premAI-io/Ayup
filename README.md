@@ -1,11 +1,9 @@
 # Vision
 
-Ayup will provide the framework necessary to analyse, modify, build, test, deploy and monitor code
-on a remote machine easily. It will allow creating a tight feedback loop that incorporates code
-analysis, GenAI and user feedback all on infrastructure of your choosing. 
+Analyse, generate, build and deploy code remotely on your hardware.
 
-It will be an all-in-one interactive CI/CD tool that is itself easy to deploy and use. It will allow
-workflows that require user interaction and feedback from deployment.
+Ayup will be an all-in-one interactive CI/CD tool that is itself easy to deploy and use. It will
+allow workflows that require user interaction and feedback from deployment.
 
 ![ayup-push-1](https://github.com/user-attachments/assets/9b7c5ff9-e2a3-4a90-a0d8-4262c78dc6d5)
 
@@ -34,13 +32,14 @@ Ayup is in the early stages of production. Some of the things that have been don
 - [x] Subdomain routing
 - [x] Build and run applications with a Dockerfile
 - [x] Secure server login and connection
+- [x] Rootless (run as a normal user)
 
 In the pipeline (in no particular order)
 
 - [ ] Detect appropriate ports to forward
 - [ ] Multiple simultaneous applications
 - [ ] Pluggable analysis/build/run step(s)
-- [ ] Bundle rootless Containerd, Buildkit, Nerdctl with the server
+- [ ] All-in-one executable
 - [ ] Watch mode for build and deploy on save
 - [ ] Deploy itself in daemon mode
 
@@ -74,32 +73,11 @@ You can see all available config using the `--help` switch e.g. `ay push --help`
 
 ## Server
 
-Presently the server has three prerequisites: Containerd, Buildkitd and Nerdctl. We plan to bundle
-or eliminate them, but for now you need to install them or use Nix as described in the
-development section.
+Presently the server has three prerequisites: Buildkit, Rootlesskit and the CNI plugins. We plan to
+bundle them, but for now you need to install them or use Nix as described in the development
+section.
 
-### Containerd
-
-This component is common and used by both Docker and Kubernetes. It needs to be running on your
-system and you need to specify it's address with `AYUP_CONTAINERD_ADDR`. Places you can find it are: 
-`/run/containerd/containerd.sock`, `/run/docker/containerd/containerd.sock` or
-`/run/k3s/containerd/containerd.sock`.
-
-### Buildkitd
-
-This is also used by Docker, but the buildkit daemon may not be running or may be configured with
-the wrong settings. The easiest way to run it with the right configuration is using Nix as described
-in the development section.
-
-It could also be started with  `buildkitd --oci-worker false --containerd-worker-addr $AYUP_CONTAINERD_ADDR`
-
-It's socket address can be configured with `AYUP_BUILDKITD_ADDR` if it's different from
-`unix:///run/buildkit/buildkitd.sock`.
-
-### Nerdctl
-
-This simply needs to be installed on your system. If your package manager does not have it, then Nix
-can be used to get it as described in the development section.
+You don't need to start Buildkitd, Ayup will start it for you inside Rootlesskit.
 
 ### Start
 
@@ -180,24 +158,23 @@ is used to provide the reference development and build environment.
 Then there is a choice between using the Nix dev shell...
 
 3. `nix develop` (I add `--command fish` to my nix command to use Fish instead of Bash)
-4. `protoc --go_out=go/internal --go-grpc_out=go/internal grpc/srv/lib.proto --go_opt=paths=source_relative --go-grpc_opt=paths=source_relative`
+4. `script/gen-src.sh`
 5. `go build -race -o bin/ay ./go`
 6. `./bin` is added to the path by Nix so now you can run `ay`
 
 Or using Nix to build/run the project...
 
-3. `sudo nix run .#dev` in another terminal to start buildkit
-4. `sudo nix run .#server` run the server
-5. `nix run .#cli` run the cli
+3. `sudo nix run .#server` run the server
+4. `nix run .#cli` run the cli
 
 Also you don't need to Git clone this project onto a system to run it with Nix. You can run the
 flake from this repo with
 
-`sudo nix run github:premAI-io/Ayup#<dev,server,cli>`
+`sudo nix run github:premAI-io/Ayup#<server,cli>`
 
 Or if you want to try out a dev branch
 
-`sudo nix run github:<user>/<repo>/<branch>#<dev,server,cli>`
+`sudo nix run github:<user>/<repo>/<branch>#<server,cli>`
 
 # Logs and tracing
 
