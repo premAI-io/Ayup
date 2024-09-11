@@ -1,29 +1,27 @@
 # Vision
 
-Analyse, generate, build and deploy code remotely on your hardware.
-
-Ayup will be an all-in-one interactive CI/CD tool that is itself easy to deploy and use. It will
-allow workflows that require user interaction and feedback from deployment.
+🚀 Quickly and securely turn any Linux box into a build and deployment assistant.
 
 ![ayup-push-1](https://github.com/user-attachments/assets/9b7c5ff9-e2a3-4a90-a0d8-4262c78dc6d5)
 
-Both the Ayup server and client are open source. The Ayup server can run on most Linux systems and
-the client on Linux, Mac and (eventually) Windows. The intention is that it is easy for you to self
-host the Ayup server.
+🔓 Both the Ayup server and client are open source. The Ayup server can run on most Linux systems and
+the client on Linux, Mac and (eventually) Windows.
 
-Web applications have their ports forwarded to the client. Allowing them to be accessed as if they
+🌐 Web applications have their ports forwarded to the client. Allowing them to be accessed as if they
 were running locally. Applications can also be served on a sub-domain of the server via the builtin
 proxy.
 
+🛠️ Figuring out how to generate, build or serve your app is left to pluggable assistants. These can be
+written in any language and are ran inside a container.
+
 # State / Roadmap
 
-## YouTube: Demo
-
-[![YouTube: Demo](http://i.ytimg.com/vi/umWNG89BXVE/hqdefault.jpg)](https://www.youtube.com/watch?v=umWNG89BXVE)
+Ayup is in the early stages of production. Presently the focus is on generalising it by offloading
+work into generic assistants.
 
 ## Tasks
 
-Ayup is in the early stages of production. Some of the things that have been done so far are
+Some of the things that have been done so far are
 
 - [x] Quick source upload
 - [x] Build and serve Python applications of a particular form
