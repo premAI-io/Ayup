@@ -2,7 +2,7 @@
 
 🚀 Quickly and securely turn any Linux box into a build and deployment assistant.
 
-![ayup-push-1](https://github.com/user-attachments/assets/9b7c5ff9-e2a3-4a90-a0d8-4262c78dc6d5)
+![ayup-push-2](https://github.com/user-attachments/assets/b96a0bf8-f515-4187-a2da-e02274b31e22)
 
 🔓 Both the Ayup server and client are open source. The Ayup server can run on most Linux systems and
 the client on Linux, Mac and (eventually) Windows.
