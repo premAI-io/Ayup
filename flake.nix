@@ -61,7 +61,7 @@
         GOARCH = "amd64";
       };
       server = pkgs.callPackage ./distros/nix/server.nix {
-        inherit version cli;
+        inherit version cli buildkit-cni-plugins;
       };
   in
     {

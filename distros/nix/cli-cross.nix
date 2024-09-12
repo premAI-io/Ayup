@@ -15,7 +15,6 @@ in
   version = version;
   src = srcWithProtobuf;
   modRoot = "./go";
-  # Use lib.fakeHash when updating deps
   inherit vendorHash;
   # Avoids workspace mode error
   proxyVendor = true;
