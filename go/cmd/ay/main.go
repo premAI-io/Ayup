@@ -24,6 +24,7 @@ import (
 	"premai.io/Ayup/go/cli/key"
 	"premai.io/Ayup/go/cli/login"
 	"premai.io/Ayup/go/cli/push"
+	"premai.io/Ayup/go/internal/conf"
 	"premai.io/Ayup/go/internal/terror"
 	ayTrace "premai.io/Ayup/go/internal/trace"
 	"premai.io/Ayup/go/internal/tui"
@@ -118,11 +119,8 @@ func Main(version string) {
 	errorStyle := tui.ErrorStyle
 	fmt.Print(titleStyle.Render("Ayup!"), " ", versionStyle.Render("v"+version), "\n\n")
 
-	confDir, userConfDirErr := os.UserConfigDir()
-	var godotenvLoadErr error
-	if userConfDirErr == nil {
-		godotenvLoadErr = godotenv.Load(filepath.Join(confDir, "ayup", "env"))
-	}
+	confDir := conf.UserConfigDir()
+	godotenvLoadErr := godotenv.Load(filepath.Join(confDir, "env"))
 
 	ktx := kong.Parse(&cli, kong.UsageOnError(), kong.Description("Just make it run!"))
 
@@ -147,7 +145,6 @@ func Main(version string) {
 	ctx, span := tracer.Start(ctx, "main")
 	defer span.End()
 
-	terror.Ackf(ctx, "os UserConfigDir: %w", userConfDirErr)
 	terror.Ackf(ctx, "godotenv load: %w", godotenvLoadErr)
 
 	err := ktx.Run(Globals{
