@@ -42,6 +42,8 @@ In the pipeline (in no particular order)
 
 # Install
 
+## Client
+
 The client CLI can be installed by copying the following into a terminal session:
 
 ```sh
@@ -51,32 +53,39 @@ curl -#L https://raw.githubusercontent.com/premAI-io/Ayup/main/script/install.sh
 Or you can download the executable from the [release page](https://github.com/premAI-io/Ayup/releases/latest).
 It's just one file, you can copy it to `/usr/bin` or wherever you put executables on your system.
 
-Presently the server is in the same executable as the client. However it has some dependencies which
-are a pain. Eventually we'll magic these away, but in the mean time see the Development section.
-
-# Running
-
-## Config
-
-All of Ayup's configuration is done via environment variables or command line switches. However you
-can also set environment variables in `~/.config/ayup/env` which is in the usual 
-[dotenv format](https://github.com/joho/godotenv).
-
-Settings you choose interactively will be persisted to the env file if possible. Command line switches and
-environment variables take precedence over the env file.
-
-You can see all available config using the `--help` switch e.g. `ay push --help`, `ay daemon start
---help`
+Presently the server is in the same executable as the client. However it has some dependencies.
 
 ## Server
 
-Presently the server has three prerequisites: Buildkit, Rootlesskit and the CNI plugins. We plan to
-bundle them, but for now you need to install them or use Nix as described in the development
-section.
+There are two easy ways to install the server: Nix and Docker. In both cases installing and running
+are practically the same operation.
 
-You don't need to start Buildkitd, Ayup will start it for you inside Rootlesskit.
+For Docker you can do
 
-### Start
+```sh
+$ mkdir ~/.config/ayup
+$ docker run --privileged --rm -it -v ~/.config/ayup:/etc/ayup -p 50051:50051 premai/ayup:latest ay daemon start --host=/ip4/0.0.0.0/tcp/50051
+```
+
+> [!TIP]
+> The Ayup server only supports Linux, but Docker Desktop should be able to run it on Windows
+> and Mac.
+
+With Nix you can start a shell and run `ay`
+
+```sh
+$ nix shell github:premAI-io/Ayup
+$ ay daemon start --host=/ip4/0.0.0.0/tcp/50051
+```
+
+See the development section for more information on Nix.
+
+To install the server manually, follow the instructions for the client and then install the
+dependencies listed in `distros/nix/server.nix`.
+
+# Running
+
+## Server
 
 To start Ayup listening for local connections do
 
@@ -95,6 +104,11 @@ encrypted connections using libp2p.
 
 Ayup will print details on how to login to the server from a client. This requires shell access to
 the Ayup server so that you can interactively authorize the client.
+
+> [!NOTE]
+> The IP address in the printed multiaddress will only be accessible locally when using Docker. It may need
+> to be replaced with the host's public IP or DNS name. For e.g
+> `/dns4/example.com/tcp/50051/p2p/1...`
 
 Clients can also be pre-authorized by adding their peer IDs to `AYUP_P2P_AUTHORIZED_CLIENTS`
 
@@ -122,6 +136,18 @@ Login always prints the client's peer ID.
 The login command will set `AYUP_PUSH_HOST` in `~/.config/ayup/env` to the address we used to login
 to. So that `ay push` will use it by default. You can override it in the environment or by using
 `--host`.
+
+## Config
+
+All of Ayup's configuration is done via environment variables or command line switches. However you
+can also set environment variables in `~/.config/ayup/env` which is in the usual
+[dotenv format](https://github.com/joho/godotenv).
+
+Settings you choose interactively will be persisted to the env file if possible. Command line switches and
+environment variables take precedence over the env file.
+
+You can see all available config using the `--help` switch e.g. `ay push --help`, `ay daemon start
+--help`
 
 ## Examples
 
@@ -161,17 +187,17 @@ Then there is a choice between using the Nix dev shell...
 
 Or using Nix to build/run the project...
 
-3. `sudo nix run .#server` run the server
+3. `nix run .#server` run the server
 4. `nix run .#cli` run the cli
 
 Also you don't need to Git clone this project onto a system to run it with Nix. You can run the
 flake from this repo with
 
-`sudo nix run github:premAI-io/Ayup#<server,cli>`
+`nix run github:premAI-io/Ayup#<server,cli>`
 
 Or if you want to try out a dev branch
 
-`sudo nix run github:<user>/<repo>/<branch>#<server,cli>`
+`nix run github:<user>/<repo>/<branch>#<server,cli>`
 
 # Logs and tracing
 
