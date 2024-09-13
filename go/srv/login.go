@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/charmbracelet/huh"
+	"github.com/muesli/termenv"
 	"go.opentelemetry.io/otel/trace"
 
 	"premai.io/Ayup/go/internal/conf"
@@ -49,14 +50,19 @@ func (s *Srv) Login(ctx context.Context, in *pb.LoginReq) (*pb.LoginReply, error
 
 	// TODO: timeout
 
+	accessible := false
+	if termenv.ColorProfile() == termenv.Ascii {
+		accessible = true
+	}
+
 	authed := false
-	err = huh.NewConfirm().
+	hconf := huh.NewConfirm().
 		Title("Authorize client?").
 		Description(fmt.Sprintf("Peer ID: %s", peerId.String())).
 		Value(&authed).
-		Run()
+		WithAccessible(accessible)
 
-	if err != nil {
+	if err := hconf.Run(); err != nil {
 		return internalError(err)
 	}
 
