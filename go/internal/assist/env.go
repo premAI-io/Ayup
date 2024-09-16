@@ -1,12 +1,10 @@
-package srv
+package assist
 
 import (
 	"context"
 	"os"
-	"path/filepath"
 
 	"go.opentelemetry.io/otel/attribute"
-	pb "premai.io/Ayup/go/internal/grpc/srv"
 	"premai.io/Ayup/go/internal/terror"
 	"premai.io/Ayup/go/internal/trace"
 
@@ -15,24 +13,14 @@ import (
 )
 
 // Load the .ayup-env file and then delete it
-func (s *Srv) loadAyupEnv(ctx context.Context, src pb.Source) (map[string][]byte, []llb.RunOption, error) {
-	var path string
-	switch src {
-	case pb.Source_app:
-		path = s.SrcDir
-	case pb.Source_assistant:
-		path = s.AssistantDir
-	}
-
-	path = filepath.Join(path, ".ayup-env")
-
+func LoadEnv(ctx context.Context, path string) (map[string][]byte, []llb.RunOption, error) {
 	providerMap := make(map[string][]byte)
 	var secretsRunOpts []llb.RunOption
 
 	env, err := godotenv.Read(path)
 	if err != nil && os.IsNotExist(err) {
-		trace.Event(ctx, ".ayup-env not found", attribute.String("path", path))
-		return providerMap, secretsRunOpts, err
+		trace.Event(ctx, "env not found", attribute.String("path", path))
+		return providerMap, secretsRunOpts, nil
 	}
 	defer func() {
 		terror.Ackf(ctx, "os Remove: %w", os.Remove(path))

@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 file_path = '/out/app/__main__.py'
 file_content = """from flask import Flask
 
@@ -15,3 +17,6 @@ with open(file_path, 'w') as file:
     file.write(file_content)
 
 print(f"File written to {file_path}")
+
+with open('/out/state/next', 'w') as file:
+    file.write('builtin:python')

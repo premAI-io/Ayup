@@ -7,10 +7,11 @@ import (
 	"os/exec"
 	"sync"
 
+	"golang.org/x/sync/errgroup"
 	"premai.io/Ayup/go/internal/terror"
+	"premai.io/Ayup/go/internal/trace"
 
 	attr "go.opentelemetry.io/otel/attribute"
-	tr "go.opentelemetry.io/otel/trace"
 )
 
 type Out struct {
@@ -22,8 +23,10 @@ type In struct {
 	Stdio []byte
 }
 
-func Start(ctx context.Context, cmd *exec.Cmd) (chan<- In, <-chan Out) {
-	span := tr.SpanFromContext(ctx)
+func Start(g *errgroup.Group, ctx context.Context, cmd *exec.Cmd) (chan<- In, <-chan Out) {
+	ctx, span := trace.Span(ctx, "start proc", attr.StringSlice("cmd", cmd.Args))
+	defer span.End()
+
 	procInChan := make(chan In, 1)
 	procOutChan := make(chan Out, 1)
 
@@ -57,19 +60,18 @@ func Start(ctx context.Context, cmd *exec.Cmd) (chan<- In, <-chan Out) {
 	var wg sync.WaitGroup
 	wg.Add(2)
 
-	readOut := func(reader *bufio.Reader) {
+	readOut := func(ctx context.Context, reader *bufio.Reader) error {
 		defer wg.Done()
 
 		scanner := bufio.NewScanner(reader)
 
 		for scanner.Scan() {
 			text := scanner.Text()
-			span.AddEvent("log", tr.WithAttributes(attr.String("text", text)))
+			trace.Event(ctx, "log", attr.String("text", text))
 		}
-	}
 
-	go readOut(outreader)
-	go readOut(errreader)
+		return scanner.Err()
+	}
 
 	err = cmd.Start()
 	if err != nil {
@@ -78,11 +80,15 @@ func Start(ctx context.Context, cmd *exec.Cmd) (chan<- In, <-chan Out) {
 
 	procDone := make(chan struct{})
 
-	go func() {
+	g.Go(func() error {
 		defer close(procOutChan)
+		ctx, span := trace.LinkedSpan(ctx, "monitor proc", span, true, attr.StringSlice("args", cmd.Args))
+		defer span.End()
 
-		go func(ctx context.Context) {
-			err = cmd.Wait()
+		g.Go(func() error { return readOut(ctx, outreader) })
+		g.Go(func() error { return readOut(ctx, errreader) })
+		g.Go(func() error {
+			err := cmd.Wait()
 			exitCode := 0
 			if err != nil {
 				if exitError, ok := err.(*exec.ExitError); ok {
@@ -98,7 +104,9 @@ func Start(ctx context.Context, cmd *exec.Cmd) (chan<- In, <-chan Out) {
 				Ret: &exitCode,
 			}
 			close(procDone)
-		}(ctx)
+
+			return err
+		})
 
 		termProc := func() {
 			if cmd.Process == nil {
@@ -110,7 +118,7 @@ func Start(ctx context.Context, cmd *exec.Cmd) (chan<- In, <-chan Out) {
 			}
 		}
 
-		span.AddEvent("Started proc")
+		trace.Event(ctx, "Started proc")
 	loop:
 		for {
 			select {
@@ -136,7 +144,9 @@ func Start(ctx context.Context, cmd *exec.Cmd) (chan<- In, <-chan Out) {
 				break loop
 			}
 		}
-	}()
+
+		return nil
+	})
 
 	return procInChan, procOutChan
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"sync"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
@@ -17,8 +16,6 @@ import (
 )
 
 type Pusher struct {
-	Tracer tr.Tracer
-
 	Host       string
 	P2pPrivKey string
 	Client     pb.SrvClient
@@ -125,12 +122,7 @@ func (s *Pusher) Run(ctx context.Context) error {
 	ctx, span := trace.Span(ctx, "push")
 	defer span.End()
 
-	privKey, err := rpc.EnsurePrivKey(ctx, "AYUP_CLIENT_P2P_PRIV_KEY", s.P2pPrivKey)
-	if err != nil {
-		return err
-	}
-
-	client, err := rpc.Client(ctx, s.Host, privKey)
+	client, err := rpc.ClientEnsureKey(ctx, s.Host, s.P2pPrivKey)
 	if err != nil {
 		return err
 	}
@@ -140,17 +132,16 @@ func (s *Pusher) Run(ctx context.Context) error {
 		return err
 	}
 
-	var wg sync.WaitGroup
-	defer wg.Wait()
-
-	fwdLis, fwdErr := s.startPortForwarder(ctx, &wg)
+	forwarder := newForwarder(client)
 	defer func() {
-		if fwdErr == nil {
-			_ = fwdLis.Close()
+		for _, lis := range forwarder.listeners {
+			_ = lis.Close()
 		}
+
+		forwarder.wg.Wait()
 	}()
 
-	_, err = s.Analysis(ctx)
+	err = s.Assist(ctx, &forwarder)
 	if err != nil {
 		return err
 	}

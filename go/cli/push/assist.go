@@ -22,10 +22,11 @@ import (
 	pb "premai.io/Ayup/go/internal/grpc/srv"
 )
 
-type AnalysisView struct {
-	ctx    context.Context
-	span   tr.Span
-	stream pb.Srv_AnalysisClient
+type AssistView struct {
+	ctx       context.Context
+	span      tr.Span
+	stream    pb.Srv_AssistClient
+	forwarder *Forwarder
 
 	choice       *huh.Form
 	spinner      spinner.Model
@@ -33,9 +34,8 @@ type AnalysisView struct {
 	histContLine bool
 	histPrevSrc  string
 
-	done   bool
-	result *pb.AnalysisResult
-	err    error
+	done bool
+	err  error
 
 	braceStyle  lipgloss.Style
 	nameStyle   lipgloss.Style
@@ -44,17 +44,19 @@ type AnalysisView struct {
 
 type choiceMsg *pb.ChoiceBool
 
-func NewAnalysisView(ctx context.Context, stream pb.Srv_AnalysisClient) AnalysisView {
+func NewAssistView(ctx context.Context, stream pb.Srv_AssistClient, fwd *Forwarder) AssistView {
 	var hist strings.Builder
 	s := spinner.New()
 	s.Spinner = spinner.Points
 	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
 
-	return AnalysisView{
-		ctx:     ctx,
-		span:    tr.SpanFromContext(ctx),
-		hist:    &hist,
-		stream:  stream,
+	return AssistView{
+		ctx:       ctx,
+		span:      tr.SpanFromContext(ctx),
+		hist:      &hist,
+		stream:    stream,
+		forwarder: fwd,
+
 		spinner: s,
 
 		braceStyle:  lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("008")),
@@ -63,7 +65,7 @@ func NewAnalysisView(ctx context.Context, stream pb.Srv_AnalysisClient) Analysis
 	}
 }
 
-func (s AnalysisView) recvMsgCmd() tea.Cmd {
+func (s AssistView) recvMsgCmd() tea.Cmd {
 	return func() tea.Msg {
 		res, err := s.stream.Recv()
 
@@ -76,7 +78,6 @@ func (s AnalysisView) recvMsgCmd() tea.Cmd {
 
 		if res.Variant == nil {
 			trace.Event(s.ctx, "recv nil done")
-			// TODO: sent by proc watcher for success, not needed for analysis anymore
 			return DoneMsg{}
 		}
 
@@ -93,16 +94,24 @@ func (s AnalysisView) recvMsgCmd() tea.Cmd {
 			if choice != nil {
 				return choiceMsg(choice)
 			}
-		case *pb.ActReply_AnalysisResult:
-			trace.Event(s.ctx, "recv analysis result")
-			return DoneMsg{}
+		case *pb.ActReply_Expose:
+			if err := s.forwarder.startPortForwarder(s.ctx, v.Expose.Port); err != nil {
+				return LogMsg{
+					source: "proxy",
+					body:   fmt.Sprintf("Couldn't forward port: %d: %s", v.Expose.Port, err.Error()),
+				}
+			}
+			return LogMsg{
+				source: "proxy",
+				body:   fmt.Sprintf("Forwarding port: %d", v.Expose.Port),
+			}
 		}
 
 		return terror.Errorf(s.ctx, "Can't handle remote response: %v", res)
 	}
 }
 
-func (s AnalysisView) sendCmd(req *pb.ActReq) tea.Cmd {
+func (s AssistView) sendCmd(req *pb.ActReq) tea.Cmd {
 	return func() tea.Msg {
 		s.span.AddEvent("sending req")
 		if err := s.stream.Send(req); err != nil {
@@ -114,28 +123,28 @@ func (s AnalysisView) sendCmd(req *pb.ActReq) tea.Cmd {
 	}
 }
 
-func (s AnalysisView) Init() tea.Cmd {
+func (s AssistView) Init() tea.Cmd {
 	return tea.Batch(s.recvMsgCmd(), s.spinner.Tick)
 }
 
 const formKeyBool = "bool"
 
-func (s AnalysisView) fmtLogHeader(source string) string {
+func (s AssistView) fmtLogHeader(source string) string {
 	return fmt.Sprintf(
 		"%s%s%s%s%s ",
 		s.braceStyle.Render("["),
-		s.nameStyle.Render("analysis"),
+		s.nameStyle.Render("assist"),
 		s.braceStyle.Render("/"),
 		s.sourceStyle.Render(source),
 		s.braceStyle.Render("]"),
 	)
 }
 
-func (s AnalysisView) writeLogHeader(source string) {
+func (s AssistView) writeLogHeader(source string) {
 	s.hist.WriteString(s.fmtLogHeader(source))
 }
 
-func (s AnalysisView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (s AssistView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		trace.Event(s.ctx, "key press", attr.String("key", msg.String()))
@@ -263,7 +272,7 @@ func (s AnalysisView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return s, nil
 }
 
-func (s AnalysisView) View() string {
+func (s AssistView) View() string {
 	if s.done {
 		return fmt.Sprintf("%s\n", s.hist.String())
 	}
@@ -294,13 +303,13 @@ func (s AnalysisView) View() string {
 	}
 }
 
-func (s *Pusher) Analysis(pctx context.Context) (result *pb.AnalysisResult, err error) {
-	ctx, span := trace.Span(pctx, "analysis")
+func (s *Pusher) Assist(pctx context.Context, fwd *Forwarder) (err error) {
+	ctx, span := trace.Span(pctx, "assist")
 	defer span.End()
 
-	stream, err := s.Client.Analysis(ctx)
+	stream, err := s.Client.Assist(ctx)
 	if err != nil {
-		return nil, terror.Errorf(ctx, "client analysis: %w", err)
+		return terror.Errorf(ctx, "client assist: %w", err)
 	}
 	defer func() {
 		err2 := stream.CloseSend()
@@ -311,20 +320,20 @@ func (s *Pusher) Analysis(pctx context.Context) (result *pb.AnalysisResult, err 
 
 	err = stream.Send(&pb.ActReq{})
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	view := NewAnalysisView(ctx, stream)
+	view := NewAssistView(ctx, stream, fwd)
 	prog := tea.NewProgram(view, tea.WithContext(ctx))
 	model, err := prog.Run()
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	view = model.(AnalysisView)
+	view = model.(AssistView)
 
 	if view.err != nil {
-		return nil, view.err
+		return view.err
 	}
 
 	msg, err := stream.Recv()
@@ -332,8 +341,8 @@ func (s *Pusher) Analysis(pctx context.Context) (result *pb.AnalysisResult, err 
 		trace.Event(ctx, "stream rcv", attr.String("msg", msg.String()))
 	}
 	if err != io.EOF {
-		return nil, terror.Errorf(ctx, "stream recv should end: %w", err)
+		return terror.Errorf(ctx, "stream recv should end: %w", err)
 	}
 
-	return view.result, nil
+	return nil
 }

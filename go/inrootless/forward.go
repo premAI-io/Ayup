@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/containernetworking/plugins/pkg/ns"
 	"go.opentelemetry.io/otel/attribute"
@@ -32,6 +34,72 @@ func withDetachedNetNSIfAny(ctx context.Context, fn func(context.Context) error)
 	return terror.Errorf(ctx, "ROOTLESSKIT_STATE_DIR not set")
 }
 
+func startConn(g *errgroup.Group, pctx context.Context, port uint32, ip string, stream pb.InRootless_ForwardServer) (net.Conn, error) {
+	addr := fmt.Sprintf("%s:%d", ip, port)
+	ctx, span := trace.Span(pctx, "start conn", attribute.String("addr", addr))
+	defer span.End()
+
+	fmt.Println("starting conn", addr)
+
+	dialer := net.Dialer{
+		Timeout: time.Second,
+	}
+	conn, err := dialer.DialContext(ctx, "tcp", addr)
+	if err != nil {
+		if err := stream.Send(&pb.ForwardResponse{
+			Closed: true,
+			Port:   port,
+		}); err != nil {
+			terror.Ackf(ctx, "stream Send: %w", err)
+		}
+
+		return nil, terror.Errorf(ctx, "net dial: %w", err)
+	}
+
+	fmt.Println("connected")
+
+	trace.Event(ctx, "new conn")
+
+	g.Go(func() error {
+		ctx, span := trace.LinkedSpan(pctx, "conn read", span, false)
+		defer span.End()
+
+		fmt.Println("starting conn read")
+
+		buf := make([]byte, 16*1024)
+		for {
+			len, err := conn.Read(buf)
+			if err != nil {
+				if err != io.EOF {
+					terror.Ackf(ctx, "conn read: %w", err)
+				}
+
+				if err := stream.Send(&pb.ForwardResponse{
+					Closed: true,
+					Port:   port,
+				}); err != nil {
+					return terror.Errorf(ctx, "stream Send: %w", err)
+				}
+
+				trace.Event(ctx, "egress done")
+				break
+			}
+
+			if err := stream.Send(&pb.ForwardResponse{
+				Data: buf[:len],
+				Port: port,
+			}); err != nil {
+				return terror.Errorf(ctx, "stream Send: %w", err)
+			}
+			trace.Event(ctx, "egress read")
+		}
+
+		return nil
+	})
+
+	return conn, nil
+}
+
 func (s *inrSrv) Forward(stream pb.InRootless_ForwardServer) error {
 	ctx := stream.Context()
 
@@ -39,77 +107,59 @@ func (s *inrSrv) Forward(stream pb.InRootless_ForwardServer) error {
 	if err != nil {
 		return terror.Errorf(ctx, "os ReadFile: %w", err)
 	}
+	ip := string(bytes.TrimSpace(bs))
 
+	fmt.Println("starting forward")
 	trace.Event(ctx, "last reserved IP", attribute.String("ip", string(bs)))
 
-	return withDetachedNetNSIfAny(ctx, func(ctx context.Context) error {
-		conn, err := net.Dial("tcp", string(bytes.TrimSpace(bs))+":5000")
-		if err != nil {
-			return terror.Errorf(ctx, "net dial: %w", err)
+	var conn net.Conn
+	var port uint32
+	var g errgroup.Group
+
+	g.Go(func() error {
+		defer func() {
+			if conn != nil {
+				terror.Ackf(ctx, "conn Close: %w", conn.Close())
+			}
+		}()
+		ctx, span := trace.Span(ctx, "ingress")
+		defer span.End()
+
+		for {
+			req, err := stream.Recv()
+			if err != nil {
+				if err != io.EOF {
+					return terror.Errorf(ctx, "stream recv: %w", err)
+				}
+
+				trace.Event(ctx, "ingress done")
+				break
+			}
+
+			trace.Event(ctx, "ingress recv")
+
+			if conn == nil {
+				port = req.Port
+				err = withDetachedNetNSIfAny(ctx, func(ctx context.Context) error {
+					conn, err = startConn(&g, ctx, port, ip, stream)
+					return err
+				})
+				if err != nil {
+					return err
+				}
+			} else if port != req.Port {
+				return terror.Errorf(ctx, "Stream started with port %d, but received message with port %d", port, req.Port)
+			}
+
+			if _, err := conn.Write(req.Data); err != nil {
+				terror.Ackf(ctx, "conn write: %w", err)
+			}
+
+			trace.Event(ctx, "ingress write")
 		}
-		defer func() { terror.Ackf(ctx, "conn close: %w", conn.Close()) }()
-		trace.Event(ctx, "connected to port 5000")
 
-		doneChan := make(chan error)
-
-		var g errgroup.Group
-
-		g.Go(func() error {
-			for {
-				req, err := stream.Recv()
-				if err != nil {
-					if err != io.EOF {
-						return terror.Errorf(ctx, "stream recv: %w", err)
-					} else {
-						trace.Event(ctx, "ingress done")
-						doneChan <- nil
-					}
-					break
-				}
-
-				trace.Event(ctx, "ingress recv")
-
-				if _, err := conn.Write(req.Data); err != nil {
-					return terror.Errorf(ctx, "conn write: %w", err)
-				}
-
-				trace.Event(ctx, "ingress write")
-			}
-
-			return terror.Errorf(ctx, "conn close: %w", conn.Close())
-		})
-
-		g.Go(func() error {
-			buf := make([]byte, 16*1024)
-			for {
-				len, err := conn.Read(buf)
-				if err != nil {
-					if err != io.EOF {
-						return terror.Errorf(ctx, "conn read: %w", err)
-					}
-
-					if err := stream.Send(&pb.ForwardResponse{
-						Closed: true,
-					}); err != nil {
-						return terror.Errorf(ctx, "stream send: %w", err)
-					}
-
-					trace.Event(ctx, "egress done")
-					return nil
-				}
-
-				trace.Event(ctx, "egress read")
-
-				if err := stream.Send(&pb.ForwardResponse{
-					Data: buf[:len],
-				}); err != nil {
-					return terror.Errorf(ctx, "stream send: %w", err)
-				}
-
-				trace.Event(ctx, "egress send")
-			}
-		})
-
-		return g.Wait()
+		return nil
 	})
+
+	return g.Wait()
 }

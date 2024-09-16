@@ -177,8 +177,8 @@ func NewFileSender(
 	}
 }
 
-func (s fileSender) SendDir(ctx context.Context, source pb.Source, path string) (err error) {
-	_, span := trace.Span(ctx, "sync dir", attr.String("path", path))
+func (s fileSender) SendDir(ctx context.Context, source pb.Source, dirPath string) (err error) {
+	_, span := trace.Span(ctx, "sync dir", attr.String("path", dirPath))
 	defer span.End()
 
 	buf := make([]byte, 16*1024)
@@ -270,17 +270,17 @@ func (s fileSender) SendDir(ctx context.Context, source pb.Source, path string) 
 		return nil
 	}
 
-	dfs := os.DirFS(path)
+	dfs := os.DirFS(dirPath)
 
 	err = fs.WalkDir(dfs, ".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return s.internalError("walkdir func(%s): %w", dirPath, err)
+		}
 
 		event_attrs := []attr.KeyValue{
 			attr.String("path", path),
 			attr.Bool("isDir", d.IsDir()),
 			attr.Bool("IsRegular", d.Type().IsRegular()),
-		}
-		if err != nil {
-			return s.internalError("walkdir func: %w", err)
 		}
 
 		info, err := d.Info()
@@ -296,13 +296,14 @@ func (s fileSender) SendDir(ctx context.Context, source pb.Source, path string) 
 		skipNotice := func(kind string) {
 			span.AddEvent("skip", tr.WithAttributes(event_attrs...))
 			if s.logChan != nil {
-				s.logChan <- fmt.Sprintf("Skip %s: %s", kind, path)
+				s.logChan <- fmt.Sprintf("Skip %s: %s: %s", source, kind, path)
 			}
 		}
 
 		if strings.HasPrefix(d.Name(), ".") &&
 			d.Name() != "." &&
-			d.Name() != ".ayup" {
+			d.Name() != ".ayup" &&
+			d.Name() != ".ayup-env" {
 			skipNotice("hidden")
 
 			if d.IsDir() {
@@ -342,6 +343,10 @@ func (s fileSender) SendDir(ctx context.Context, source pb.Source, path string) 
 
 		return sendFile(path, r)
 	})
+
+	if err != nil {
+		return
+	}
 
 	if err = sendFileChunks(); err != nil {
 		return

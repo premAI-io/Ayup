@@ -27,14 +27,8 @@ func (s *Srv) Download(req *pb.DownloadReq, stream pb.Srv_DownloadServer) error 
 
 	fileSender := rpc.NewFileSender(stream, nil, nil, sendError, internalError)
 
-	if err := fileSender.SendDir(ctx, pb.Source_app, s.SrcDir); err != nil {
+	if err := fileSender.SendDir(ctx, pb.Source_app, s.AppDir); err != nil {
 		return err
-	}
-
-	if s.push.hasAssistant {
-		if err := fileSender.SendDir(ctx, pb.Source_assistant, s.AssistantDir); err != nil {
-			return err
-		}
 	}
 
 	return nil
@@ -42,7 +36,7 @@ func (s *Srv) Download(req *pb.DownloadReq, stream pb.Srv_DownloadServer) error 
 
 func (s *Srv) Upload(stream pb.Srv_UploadServer) error {
 	ctx := stream.Context()
-	ctx, span := trace.Span(ctx, "upload", attr.String("srcDir", s.SrcDir), attr.String("assDir", s.AssistantDir))
+	ctx, span := trace.Span(ctx, "upload", attr.String("srcDir", s.AppDir), attr.String("assDir", s.AssistantDir))
 	defer span.End()
 
 	sendErrorClose := func(msgf string, args ...any) error {
@@ -75,15 +69,15 @@ func (s *Srv) Upload(stream pb.Srv_UploadServer) error {
 		}
 	}
 
-	if err := os.RemoveAll(s.SrcDir); err != nil && !os.IsNotExist(err) {
+	if err := os.RemoveAll(s.AppDir); err != nil && !os.IsNotExist(err) {
 		return internalError("RemoveAll: %w", err)
 	}
 
-	if err := os.MkdirAll(s.SrcDir, 0700); err != nil {
+	if err := os.MkdirAll(s.AppDir, 0700); err != nil {
 		return internalError("os MkdirAll: %w", err)
 	}
 
-	fileRecvr := rpc.NewFileRecver(stream, nil, sendErrorClose, internalError, s.SrcDir, s.AssistantDir)
+	fileRecvr := rpc.NewFileRecver(stream, nil, sendErrorClose, internalError, s.AppDir, s.AssistantDir)
 
 	if err := fileRecvr.RecvDirs(ctx); err != nil {
 		if !errors.Is(err, io.EOF) {

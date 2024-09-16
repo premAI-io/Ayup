@@ -3,26 +3,48 @@ package push
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"sync"
 
+	"go.opentelemetry.io/otel/attribute"
 	"premai.io/Ayup/go/internal/terror"
 	"premai.io/Ayup/go/internal/trace"
 
 	pb "premai.io/Ayup/go/internal/grpc/srv"
 )
 
-func (s *Pusher) startPortForwarder(ctx context.Context, wg *sync.WaitGroup) (net.Listener, error) {
-	listener, err := net.Listen("tcp", "localhost:5000")
+type Forwarder struct {
+	wg     sync.WaitGroup
+	Client pb.SrvClient
+
+	listeners map[uint32]net.Listener
+}
+
+func newForwarder(client pb.SrvClient) Forwarder {
+	return Forwarder{
+		Client:    client,
+		listeners: map[uint32]net.Listener{},
+	}
+}
+
+func (s *Forwarder) startPortForwarder(ctx context.Context, port uint32) error {
+	ctx, span := trace.Span(ctx, "start port forwarder")
+	defer span.End()
+
+	listener, err := net.Listen("tcp", fmt.Sprintf("localhost:%d", port))
 	if err != nil {
-		return nil, terror.Errorf(ctx, "net listen: %w", err)
+		return terror.Errorf(ctx, "net listen: %w", err)
 	}
 
-	trace.Event(ctx, "TCP proxy listening on 5000")
+	s.listeners[port] = listener
+	trace.Event(ctx, "TCP proxy listening", attribute.Int("port", int(port)))
 
 	egress := func(ctx context.Context, wg *sync.WaitGroup, conn net.Conn, stream pb.Srv_ForwardClient) {
 		defer wg.Done()
+		ctx, span := trace.Span(ctx, "egress")
+		defer span.End()
 
 		buf := make([]byte, 16*1024)
 		for {
@@ -42,6 +64,7 @@ func (s *Pusher) startPortForwarder(ctx context.Context, wg *sync.WaitGroup) (ne
 
 			if err := stream.Send(&pb.ForwardRequest{
 				Data: buf[:len],
+				Port: port,
 			}); err != nil {
 				terror.Ackf(ctx, "stream send: %w", err)
 				return
@@ -53,6 +76,8 @@ func (s *Pusher) startPortForwarder(ctx context.Context, wg *sync.WaitGroup) (ne
 
 	ingress := func(ctx context.Context, wg *sync.WaitGroup, conn net.Conn, stream pb.Srv_ForwardClient) {
 		defer wg.Done()
+		ctx, span := trace.Span(ctx, "ingress")
+		defer span.End()
 
 		for {
 			res, err := stream.Recv()
@@ -82,8 +107,10 @@ func (s *Pusher) startPortForwarder(ctx context.Context, wg *sync.WaitGroup) (ne
 		terror.Ackf(ctx, "conn close: %w", conn.Close())
 	}
 
-	handler := func(conn net.Conn) {
+	handler := func(ctx context.Context, conn net.Conn) {
 		defer func() { terror.Ackf(ctx, "proxy conn close: %w", conn.Close()) }()
+		ctx, span := trace.Span(ctx, "handler")
+		defer span.End()
 
 		stream, err := s.Client.Forward(ctx)
 		if err != nil {
@@ -94,19 +121,17 @@ func (s *Pusher) startPortForwarder(ctx context.Context, wg *sync.WaitGroup) (ne
 		var wg sync.WaitGroup
 		wg.Add(2)
 
-		ctx := stream.Context()
-
 		go ingress(ctx, &wg, conn, stream)
 		go egress(ctx, &wg, conn, stream)
 
 		wg.Wait()
-
-		trace.Event(ctx, "conn done")
 	}
 
-	wg.Add(1)
+	s.wg.Add(1)
 	go func() {
-		defer wg.Done()
+		defer s.wg.Done()
+		ctx, span := trace.LinkedSpan(ctx, "forwarder listen", span, true)
+		defer span.End()
 
 		conns := make([]net.Conn, 0, 16)
 		for {
@@ -123,7 +148,7 @@ func (s *Pusher) startPortForwarder(ctx context.Context, wg *sync.WaitGroup) (ne
 			trace.Event(ctx, "port forwarder listener accept")
 
 			conns = append(conns, conn)
-			go handler(conn)
+			go handler(ctx, conn)
 		}
 
 		for _, conn := range conns {
@@ -131,5 +156,5 @@ func (s *Pusher) startPortForwarder(ctx context.Context, wg *sync.WaitGroup) (ne
 		}
 	}()
 
-	return listener, nil
+	return nil
 }

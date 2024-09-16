@@ -21,6 +21,8 @@ type DaemonStartCmd struct {
 
 	P2pPrivKey           string `env:"AYUP_SERVER_P2P_PRIV_KEY" help:"The server's private key, generated automatically if not set, also see 'ay key new'"`
 	P2pAuthorizedClients string `env:"AYUP_P2P_AUTHORIZED_CLIENTS" help:"Comma deliminated public keys of logged in clients"`
+
+	AssistantsDir string `env:"AYUP_ASSISTANTS_DIR" help:"Local path to the source code for the 'remote' assistants. That is assistants distributed with Ayup or from somewhere other than the client machine"`
 }
 
 func (s *DaemonStartCmd) Run(g Globals) (err error) {
@@ -38,11 +40,21 @@ func (s *DaemonStartCmd) Run(g Globals) (err error) {
 			return
 		}
 
+		assistantsDataDir := filepath.Join(conf.UserRoot(), "assistants")
+		if err = os.MkdirAll(assistantsDataDir, 0700); err != nil {
+			err = terror.Errorf(ctx, "os MkdirAll: %w", err)
+			return
+		}
+
 		r := srv.Srv{
-			AssistantDir: filepath.Join(tmp, "ass"),
-			SrcDir:       filepath.Join(tmp, "src"),
-			Host:         s.Host,
-			P2pPrivKey:   s.P2pPrivKey,
+			AssistantDir:        filepath.Join(tmp, "assist"),
+			RemoteAssistantsDir: s.AssistantsDir,
+			LocalAssistantsDir:  assistantsDataDir,
+			AppDir:              filepath.Join(tmp, "app"),
+			StateDir:            filepath.Join(tmp, "state"),
+			ScratchDir:          filepath.Join(tmp, "scratch"),
+			Host:                s.Host,
+			P2pPrivKey:          s.P2pPrivKey,
 		}
 
 		var authedClients []peer.ID

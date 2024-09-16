@@ -27,7 +27,7 @@ func (s *Login) Run(pctx context.Context) error {
 		return err
 	}
 
-	c, err := rpc.Client(ctx, s.Host, privKey)
+	c, err := rpc.ClientWithKey(ctx, s.Host, privKey)
 	if err != nil {
 		return err
 	}

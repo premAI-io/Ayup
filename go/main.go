@@ -7,7 +7,7 @@ import (
 )
 
 //go:embed version.txt
-var version string
+var version []byte
 
 func main() {
 	ay.Main(version)

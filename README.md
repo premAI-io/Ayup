@@ -12,7 +12,8 @@ were running locally. Applications can also be served on a sub-domain of the ser
 proxy.
 
 🛠️ Figuring out how to generate, build or serve your app is left to pluggable assistants. These can be
-written in any language and are ran inside a container.
+written in any language and are ran inside a container. They can be chained together like
+middleware.
 
 # State / Roadmap
 
@@ -30,12 +31,12 @@ Some of the things that have been done so far are
 - [x] Build and run applications with a Dockerfile
 - [x] Secure server login and connection
 - [x] Rootless (run as a normal user)
+- [x] Pluggable analysis/build/run step(s) (Assistants)
+- [x] Detect appropriate ports to forward (In Dockefile)
 
 In the pipeline (in no particular order)
 
-- [ ] Detect appropriate ports to forward
 - [ ] Multiple simultaneous applications
-- [ ] Pluggable analysis/build/run step(s)
 - [ ] All-in-one executable
 - [ ] Watch mode for build and deploy on save
 - [ ] Deploy itself in daemon mode
@@ -115,7 +116,7 @@ Clients can also be pre-authorized by adding their peer IDs to `AYUP_P2P_AUTHORI
 ## Client
 
 If the Ayup server is running locally, then all you need to do is change to a source code directory
-and run `ay push`
+and run `ay app push`
 
 Otherwise you first need to login. The server prints the login command you need to use, it will look
 something like:
@@ -134,7 +135,7 @@ $ ay login foo
 Login always prints the client's peer ID. 
 
 The login command will set `AYUP_PUSH_HOST` in `~/.config/ayup/env` to the address we used to login
-to. So that `ay push` will use it by default. You can override it in the environment or by using
+to. So that `ay app push` will use it by default. You can override it in the environment or by using
 `--host`.
 
 ## Config

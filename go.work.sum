@@ -587,6 +587,7 @@ github.com/tonistiigi/go-actions-cache v0.0.0-20240320205438-9794bdbb2fb4/go.mod
 github.com/tonistiigi/go-actions-cache v0.0.0-20240327122527-58651d5e11d6/go.mod h1:anhKd3mnC1shAbQj1Q4IJ+w6xqezxnyDYlx/yKa7IXM=
 github.com/tonistiigi/go-archvariant v1.0.0 h1:5LC1eDWiBNflnTF1prCiX09yfNHIxDC/aukdhCdTyb0=
 github.com/tonistiigi/go-archvariant v1.0.0/go.mod h1:TxFmO5VS6vMq2kvs3ht04iPXtu2rUT/erOnGFYfk5Ho=
+github.com/tonistiigi/go-csvvalue v0.0.0-20240710180619-ddb21b71c0b4 h1:7I5c2Ig/5FgqkYOh/N87NzoyI9U15qUPXhDD8uCupv8=
 github.com/tonistiigi/go-csvvalue v0.0.0-20240710180619-ddb21b71c0b4/go.mod h1:278M4p8WsNh3n4a1eqiFcV2FGk7wE5fwUpUom9mK9lE=
 github.com/tonistiigi/vt100 v0.0.0-20230623042737-f9a4f7ef6531/go.mod h1:ulncasL3N9uLrVann0m+CDlJKWsIAP34MPcOJF6VRvc=
 github.com/tonistiigi/vt100 v0.0.0-20240514184818-90bafcd6abab h1:H6aJ0yKQ0gF49Qb2z5hI1UHxSQt4JMyxebFR15KnApw=

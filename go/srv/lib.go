@@ -12,11 +12,14 @@ import (
 
 	gostream "github.com/libp2p/go-libp2p-gostream"
 	p2pPeer "github.com/libp2p/go-libp2p/core/peer"
+	"golang.org/x/sync/errgroup"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/peer"
 
+	"premai.io/Ayup/go/assistants"
+	"premai.io/Ayup/go/internal/assist"
 	"premai.io/Ayup/go/internal/conf"
 	inrPb "premai.io/Ayup/go/internal/grpc/inrootless"
 	pb "premai.io/Ayup/go/internal/grpc/srv"
@@ -34,15 +37,17 @@ import (
 
 type Push struct {
 	hasAssistant bool
-
-	analysis *pb.AnalysisResult
 }
 
 type Srv struct {
 	pb.UnimplementedSrvServer
 
-	AssistantDir string
-	SrcDir       string
+	AssistantDir        string
+	RemoteAssistantsDir string
+	LocalAssistantsDir  string
+	AppDir              string
+	StateDir            string
+	ScratchDir          string
 
 	Host             string
 	P2pPrivKey       string
@@ -50,9 +55,9 @@ type Srv struct {
 
 	BuildkitdAddr string
 
+	registry  *assistants.Registry
 	inrClient inrPb.InRootlessClient
 
-	// Instance of a push, here while we don't have apps, users, sessions etc.
 	push Push
 
 	tuiMutex sync.Mutex
@@ -67,11 +72,6 @@ func newErrorReply(error string) *pb.ActReply {
 			},
 		},
 	}
-}
-
-type recvReq struct {
-	req *pb.ActReq
-	err error
 }
 
 func remotePeerId(ctx context.Context) (peerId p2pPeer.ID, err error) {
@@ -125,7 +125,7 @@ func (s *Srv) checkPeerAuth(ctx context.Context) (bool, error) {
 	return false, nil
 }
 
-func (s *Srv) runRootlessBuildkit(ctx context.Context, selfExe string) (tr.Span, chan<- proc.In, <-chan proc.Out) {
+func (s *Srv) runRootlessBuildkit(g *errgroup.Group, ctx context.Context, selfExe string) (tr.Span, chan<- proc.In, <-chan proc.Out) {
 	ctx, span := trace.Span(ctx, "start buildkit")
 
 	s.BuildkitdAddr = "unix://" + filepath.Join(conf.UserRuntimeDir(), "buildkit", "buildkit.sock")
@@ -153,7 +153,7 @@ func (s *Srv) runRootlessBuildkit(ctx context.Context, selfExe string) (tr.Span,
 
 	cmd := exec.Command("rootlesskit", cmdArgs...)
 
-	pi, po := proc.Start(ctx, cmd)
+	pi, po := proc.Start(g, ctx, cmd)
 
 	return span, pi, po
 }
@@ -171,10 +171,17 @@ func (s *Srv) RunServer(pctx context.Context) (err error) {
 		return terror.Errorf(ctx, "os Executable: %w", err)
 	}
 
-	buildkitSpan, _, buildkitOut := s.runRootlessBuildkit(ctx, selfExe)
-
 	privKey, err := rpc.EnsurePrivKey(ctx, "AYUP_SERVER_P2P_PRIV_KEY", s.P2pPrivKey)
 	if err != nil {
+		return err
+	}
+
+	s.registry = assistants.NewRegistry()
+	if err := s.registry.RegisterDirs(ctx, assist.Remote, s.RemoteAssistantsDir); err != nil {
+		return err
+	}
+
+	if err := s.registry.RegisterDirs(ctx, assist.Local, s.LocalAssistantsDir); err != nil {
 		return err
 	}
 
@@ -229,6 +236,10 @@ func (s *Srv) RunServer(pctx context.Context) (err error) {
 
 	s.inrClient = inrPb.NewInRootlessClient(inrConn)
 
+	var g errgroup.Group
+
+	buildkitSpan, _, buildkitOut := s.runRootlessBuildkit(&g, ctx, selfExe)
+
 	var wg sync.WaitGroup
 	defer wg.Wait()
 
@@ -263,5 +274,5 @@ func (s *Srv) RunServer(pctx context.Context) (err error) {
 		return terror.Errorf(ctx, "serve: %w", err)
 	}
 
-	return nil
+	return g.Wait()
 }

@@ -94,7 +94,7 @@ func Listen(ctx context.Context, addr string, priv crypto.PrivKey) (net.Listener
 	return lis, host, nil
 }
 
-func Client(ctx context.Context, target string, priv crypto.PrivKey) (pb.SrvClient, error) {
+func ClientWithKey(ctx context.Context, target string, priv crypto.PrivKey) (pb.SrvClient, error) {
 	provider := trace.SpanFromContext(ctx).TracerProvider()
 
 	maddr, err := multiaddr.NewMultiaddr(target)
@@ -161,4 +161,13 @@ func Client(ctx context.Context, target string, priv crypto.PrivKey) (pb.SrvClie
 	}
 
 	return pb.NewSrvClient(conn), nil
+}
+
+func ClientEnsureKey(ctx context.Context, target string, b64PrivKey string) (pb.SrvClient, error) {
+	privKey, err := EnsurePrivKey(ctx, "AYUP_CLIENT_P2P_PRIV_KEY", b64PrivKey)
+	if err != nil {
+		return nil, err
+	}
+
+	return ClientWithKey(ctx, target, privKey)
 }
