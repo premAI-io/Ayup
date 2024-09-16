@@ -302,7 +302,7 @@ func (s fileSender) SendDir(ctx context.Context, source pb.Source, path string) 
 
 		if strings.HasPrefix(d.Name(), ".") &&
 			d.Name() != "." &&
-			d.Name() != ".ayup-env" {
+			d.Name() != ".ayup" {
 			skipNotice("hidden")
 
 			if d.IsDir() {
