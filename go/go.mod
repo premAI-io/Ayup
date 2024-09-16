@@ -1,11 +1,11 @@
 module premai.io/Ayup/go
 
-go 1.22.5
+go 1.22.7
 
 require (
-	github.com/alecthomas/kong v1.2.0
+	github.com/alecthomas/kong v1.2.1
 	github.com/charmbracelet/bubbles v0.20.0
-	github.com/charmbracelet/bubbletea v1.1.0
+	github.com/charmbracelet/bubbletea v1.1.1
 	github.com/charmbracelet/huh v0.6.0
 	github.com/charmbracelet/lipgloss v0.13.0
 	github.com/containernetworking/plugins v1.5.1
@@ -20,8 +20,8 @@ require (
 	github.com/multiformats/go-multiaddr v0.13.0
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/tonistiigi/fsutil v0.0.0-20240902111258-43b9329361d9
-	go.opentelemetry.io/contrib/bridges/otelslog v0.4.0
-	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.54.0
+	go.opentelemetry.io/contrib/bridges/otelslog v0.5.0
+	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.55.0
 	go.opentelemetry.io/otel v1.30.0
 	go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp v0.6.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.30.0
@@ -30,7 +30,7 @@ require (
 	go.opentelemetry.io/otel/sdk/log v0.6.0
 	go.opentelemetry.io/otel/trace v1.30.0
 	golang.org/x/sync v0.8.0
-	google.golang.org/grpc v1.66.1
+	google.golang.org/grpc v1.66.2
 	google.golang.org/protobuf v1.34.2
 )
 
