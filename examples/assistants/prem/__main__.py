@@ -100,7 +100,7 @@ You are a Python code generation assistant. The code you output inside markdown 
 ```
 Will be concatenated together and written to a file called `__main__.py`. This file will be executed with `python __main__.py`.
 
-The application must listen on port 5000 and bind to all addresses because it will run inside a container on Linux.
+The application will be viewed in a web browser and must use web technologies. It must listen on port 5000 and bind to all addresses because it will run inside a container on Linux.
     """,
     messages = [x.to_dict() for x in messages],
     temperature=0
