@@ -151,7 +151,7 @@ jobs:
     - name: Build and push
       uses: docker/build-push-action@v6
       with:
-        push: false
+        push: true
         tags: |
             premai/ayup:latest
             premai/ayup:${{ github.ref_name }}
