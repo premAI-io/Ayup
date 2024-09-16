@@ -9,9 +9,11 @@ package srv;
 service Srv {
     rpc Upload(stream FileChunks) returns (Result);
     rpc Download(DownloadReq) returns (stream FileChunks);
-    rpc Analysis(stream ActReq) returns (stream ActReply);
+    rpc Assist(stream ActReq) returns (stream ActReply);
     rpc Login(LoginReq) returns (LoginReply);
     rpc Forward(stream ForwardRequest) returns (stream ForwardResponse);
+    rpc AssistantsList(AssistantsListReq) returns (AssistantsListResp);
+    rpc AssistantsPush(AssistantsPushReq) returns (AssistantsPushResp);
 }
 
 enum Source {
@@ -78,13 +80,8 @@ message Chosen {
     }
 }
 
-message AnalysisResult {
-    bool useDockerfile = 1;
-    bool usePythonRequirements = 2;
-
-    bool needsGit = 3;
-    bool needsLibGL = 4;
-    bool needsLibGlib = 5;
+message ExposePort {
+    uint32 port = 1;
 }
 
 // Generic streamed reply to actions
@@ -92,7 +89,7 @@ message ActReply {
     oneof variant {
         string log = 2;
         Choice choice = 3;
-        AnalysisResult analysisResult = 4;
+        ExposePort expose = 4;
         Error error = 5;
     }
 
@@ -111,10 +108,25 @@ message ActReq {
 
 message ForwardRequest {
     bytes data = 2;
+    uint32 port = 3;
 }
 
 message ForwardResponse {
     bytes data = 2;
+    uint32 port = 3;
 
-    bool closed = 3;
+    bool closed = 4;
 }
+
+message AssistantsListReq {}
+
+message AssistantInfo {
+    string name = 1;
+}
+
+message AssistantsListResp {
+    repeated AssistantInfo assistants = 1;
+}
+
+message AssistantsPushReq {}
+message AssistantsPushResp {}

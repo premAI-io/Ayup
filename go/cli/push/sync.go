@@ -80,8 +80,6 @@ func (s *Pusher) Upload(pctx context.Context) (err error) {
 	ctx, span := trace.Span(pctx, "upload")
 	defer span.End()
 
-	src := s.SrcDir
-
 	stream, err := s.Client.Upload(ctx)
 	if err != nil {
 		return terror.Errorf(ctx, "sync stream: %w", err)
@@ -143,8 +141,10 @@ func (s *Pusher) Upload(pctx context.Context) (err error) {
 
 	sender := rpc.NewFileSender(stream, cancelChan, logChan, retError, retError)
 
-	if err := sender.SendDir(ctx, pb.Source_app, src); err != nil {
-		return err
+	if s.SrcDir != "" {
+		if err := sender.SendDir(ctx, pb.Source_app, s.SrcDir); err != nil {
+			return err
+		}
 	}
 
 	if s.AssistantDir == "" {

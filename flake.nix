@@ -70,6 +70,7 @@
         buildInputs = buildkitDevPkgs ++ goDevPkgs ++ pyAnalysis;
         shellHook = ''
             export PATH=$PATH:$PWD/bin
+            export AYUP_ASSISTANTS_DIR=$PWD/assistants
         '';
       };
 

@@ -17,20 +17,29 @@ project_id = os.getenv("PREM_PROJECT_ID")
 if project_id is None:
     raise ValueError("Environment variable PREM_PROJECT_ID is not set. You can set variables in .ayup-env")
 
+# The raw response received from the LLM
+out_explanation_path = '/out/app/explanation.md'
+
 # The application is written to /out/app which will be mounted as /app in the final container
 out_app_path = '/out/app/__main__.py'
+
+# The previous response from the LLM
+in_explanation_path = 'in/app/explanation.md'
 
 # The previous or existing application is available here
 in_app_path = '/in/app/__main__.py'
 
 # The logs for the previous execution are available here
-in_log_path = '/in/log'
+in_log_path = '/in/state/log'
 
 # The prompt file specifying what the app does. Taken from the source directory
 in_spec_path= '/in/app/spec'
 
 # The prompt file describing a correction or problem. Taken from the source directory
 in_fix_path= '/in/app/fix'
+
+# The next assistant to run is written here
+out_next_path='/out/state/next'
 
 client = Prem(api_key=prem_api_key)
 
@@ -46,11 +55,12 @@ def slurp(path: str) -> str:
 messages: list[Message] = []
 
 spec = slurp(in_spec_path)
+msg = slurp(in_explanation_path)
 src = slurp(in_app_path)
 log = slurp(in_log_path)
 fix = slurp(in_fix_path)
 
-if src == '' and spec == '':
+if msg == '' and src == '' and spec == '':
     raise Exception(f"Both {in_app_path} and {in_spec_path} are missing")
 
 if fix == '' and spec == '':
@@ -62,14 +72,14 @@ if spec != '':
         content=spec
     ))
 
-if src != '':
+if msg != '' or src != '':
     messages.append(Message(
         role=MessageRoleEnum.ASSISTANT,
-        content=f"""
+        content= f"""
 ```python
 {src}
 ```
-"""
+""" if msg == '' else msg
     ))
 
     user_resp = ""
@@ -82,6 +92,9 @@ When I ran the program and it produced the following log output:
 {log}
 ```
 """
+    if user_resp == '':
+        user_resp += "please review and improve the code"
+
     messages.append(Message(
         role=MessageRoleEnum.USER,
         content=user_resp
@@ -115,6 +128,9 @@ if not isinstance(c, str):
     print("No mesage content to write!")
     sys.exit(1)
 
+with open(out_explanation_path, 'w') as file:
+    file.write(c)
+
 # Parse the Markdown content
 doc = Document(c)
 
@@ -134,3 +150,7 @@ with open(out_app_path, 'w') as file:
         file.write(block)
 
 print(f"File written to {out_app_path}")
+
+with open(out_next_path, 'w') as file:
+    file.write("builtin:python")
+

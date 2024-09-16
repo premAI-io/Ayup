@@ -148,17 +148,27 @@ func SetSpanKind(ctx context.Context, kind tr.SpanKind) context.Context {
 	return context.WithValue(ctx, spanKindKey, kind)
 }
 
-func Span(ctx context.Context, name string, attrs ...attr.KeyValue) (context.Context, tr.Span) {
+func start(ctx context.Context, name string, opts ...tr.SpanStartOption) (context.Context, tr.Span) {
 	parent := tr.SpanFromContext(ctx)
 	tracer := parent.TracerProvider().Tracer("premai.io/Ayup/go/internal/trace")
 
 	kind, ok := ctx.Value(spanKindKey).(tr.SpanKind)
-
 	if ok {
-		return tracer.Start(ctx, name, tr.WithSpanKind(kind), tr.WithAttributes(attrs...))
+		opts = append(opts, tr.WithSpanKind(kind))
 	}
 
-	return tracer.Start(ctx, name, tr.WithAttributes(attrs...))
+	return tracer.Start(ctx, name, opts...)
+}
+
+func Span(ctx context.Context, name string, attrs ...attr.KeyValue) (context.Context, tr.Span) {
+	return start(ctx, name, tr.WithAttributes(attrs...))
+}
+
+func LinkedSpan(ctx context.Context, name string, linkTo tr.Span, newRoot bool, attrs ...attr.KeyValue) (context.Context, tr.Span) {
+	link := tr.Link{
+		SpanContext: linkTo.SpanContext(),
+	}
+	return start(ctx, name, tr.WithAttributes(attrs...), tr.WithNewRoot(), tr.WithLinks(link))
 }
 
 func Event(ctx context.Context, name string, attrs ...attr.KeyValue) {

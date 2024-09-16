@@ -21,10 +21,13 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/muesli/termenv"
 
+	"premai.io/Ayup/go/cli/assistants"
 	"premai.io/Ayup/go/cli/key"
 	"premai.io/Ayup/go/cli/login"
 	"premai.io/Ayup/go/cli/push"
+	"premai.io/Ayup/go/cli/state"
 	"premai.io/Ayup/go/internal/conf"
+	"premai.io/Ayup/go/internal/semver"
 	"premai.io/Ayup/go/internal/terror"
 	ayTrace "premai.io/Ayup/go/internal/trace"
 	"premai.io/Ayup/go/internal/tui"
@@ -37,29 +40,38 @@ type Globals struct {
 }
 
 type PushCmd struct {
-	Path      string `arg:"" optional:"" name:"path" help:"Path to the source code to be pushed" type:"path"`
-	Assistant string `env:"AYUP_ASSISTANT_PATH" help:"The location of the assistant plugin source if any" type:"path"`
+	Assistant string `env:"AYUP_ASSISTANT_PATH" help:"The path of a local assistant to use during this operation. To push multiple assistants see 'ay assistants'" type:"path"`
 
 	Host       string `env:"AYUP_PUSH_HOST" default:"localhost:50051" help:"The location of a service we can push to"`
 	P2pPrivKey string `env:"AYUP_CLIENT_P2P_PRIV_KEY" help:"Secret encryption key produced by 'ay key new'"`
 }
 
+func ensurePath(ctx context.Context, inPath string) (string, error) {
+	if inPath != "" {
+		return inPath, nil
+	}
+
+	outPath, err := os.Getwd()
+	if err != nil {
+		return "", terror.Errorf(ctx, "getwd: %w", err)
+	}
+
+	return outPath, nil
+}
+
 func (s *PushCmd) Run(g Globals) (err error) {
 	pprof.Do(g.Ctx, pprof.Labels("command", "push"), func(ctx context.Context) {
-		if s.Path == "" {
-			s.Path, err = os.Getwd()
-			if err != nil {
-				err = terror.Errorf(ctx, "getwd: %w", err)
-				return
-			}
+		var path string
+		path, err = ensurePath(ctx, cli.App.Path)
+		if err != nil {
+			return
 		}
 
 		p := push.Pusher{
-			Tracer:       g.Tracer,
 			Host:         s.Host,
 			P2pPrivKey:   s.P2pPrivKey,
 			AssistantDir: s.Assistant,
-			SrcDir:       s.Path,
+			SrcDir:       path,
 		}
 
 		err = p.Run(pprof.WithLabels(g.Ctx, pprof.Labels("command", "push")))
@@ -88,8 +100,42 @@ func (s *KeyNewCmd) Run(g Globals) error {
 	return key.New(g.Ctx)
 }
 
+type StateAssistantCmd struct {
+	Name string `arg:"" optional:"" help:"The name of the assistant to set. Leave blank to see the current one."`
+}
+
+func (s *StateAssistantCmd) Run(g Globals) error {
+	if s.Name != "" {
+		return state.SetAssistant(g.Ctx, cli.App.Path, s.Name)
+	}
+
+	if err := state.HasAyup(g.Ctx, cli.App.Path); err != nil {
+		return err
+	}
+
+	return state.ShowAssistant(g.Ctx, cli.App.Path)
+}
+
+type AssistantsPush struct {
+	Path string `arg:"" optional:"" help:"The path to the assistant's source directory"`
+}
+
+func (s *AssistantsPush) Run(g Globals) error {
+	path, err := ensurePath(g.Ctx, s.Path)
+	if err != nil {
+		return err
+	}
+
+	return assistants.Push(g.Ctx, cli.Assistants.Host, cli.Assistants.P2pPrivKey, path)
+}
+
+type AssistantsList struct{}
+
+func (s *AssistantsList) Run(g Globals) error {
+	return assistants.List(g.Ctx, cli.Assistants.Host, cli.Assistants.P2pPrivKey)
+}
+
 var cli struct {
-	Push  PushCmd  `cmd:"" help:"Figure out how to deploy your application"`
 	Login LoginCmd `cmd:"" help:"Login to the Ayup service"`
 
 	Daemon struct {
@@ -101,6 +147,21 @@ var cli struct {
 		New KeyNewCmd `cmd:"" help:"Create a new private key"`
 	} `cmd:"" help:"Manage encryption keys used by Ayup"`
 
+	App struct {
+		Path string `env:"AYUP_APP_PATH" help:"The path to application source directory. The current working directory is used if not set"`
+
+		Push      PushCmd           `cmd:"" help:"Figure out how to deploy your application"`
+		Assistant StateAssistantCmd `cmd:"" help:"Set or get the first assistant to run. Left unset we'll try to detect what to run"`
+	} `cmd:"" help:"Manage the application state"`
+
+	Assistants struct {
+		Host       string `env:"AYUP_PUSH_HOST" default:"localhost:50051" help:"The location of a service we can push to"`
+		P2pPrivKey string `env:"AYUP_CLIENT_P2P_PRIV_KEY" help:"The client's private key, generated automatically if not set, also see 'ay key new'"`
+
+		Push AssistantsPush `cmd:"" help:"Upload a 'local' assistant to the server using its source"`
+		List AssistantsList `cmd:"" help:"List the available assistants on the server"`
+	} `cmd:"" help:"Manage build and deployment assistants"`
+
 	// maybe effected by https://github.com/open-telemetry/opentelemetry-go/issues/5562
 	// also https://github.com/moby/moby/issues/46129#issuecomment-2016552967
 	TelemetryEndpoint       string `group:"monitoring" env:"OTEL_EXPORTER_OTLP_ENDPOINT" help:"the host that telemetry data is sent to; e.g. http://localhost:4317"`
@@ -108,7 +169,7 @@ var cli struct {
 	ProfilingEndpoint       string `group:"monitoring" env:"PYROSCOPE_ADHOC_SERVER_ADDRESS" help:"URL performance data is sent to; e.g. http://localhost:4040"`
 }
 
-func Main(version string) {
+func Main(version []byte) {
 	ctx := context.Background()
 
 	// Disable dynamic dark background detection
@@ -117,7 +178,12 @@ func Main(version string) {
 	titleStyle := tui.TitleStyle
 	versionStyle := tui.VersionStyle
 	errorStyle := tui.ErrorStyle
-	fmt.Print(titleStyle.Render("Ayup!"), " ", versionStyle.Render("v"+version), "\n\n")
+
+	if err := semver.SetAyupVersion(version); err != nil {
+		log.Fatalln(err)
+	}
+	version = semver.GetAyupVersion().Bytes()
+	fmt.Print(titleStyle.Render("Ayup!"), " ", versionStyle.Render("v"+string(version), "\n\n"))
 
 	confDir := conf.UserConfigDir()
 	godotenvLoadErr := godotenv.Load(filepath.Join(confDir, "env"))

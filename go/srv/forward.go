@@ -61,6 +61,7 @@ func (s *Srv) Forward(stream pb.Srv_ForwardServer) error {
 
 			if err := inrStream.Send(&inrPb.ForwardRequest{
 				Data: req.Data,
+				Port: req.Port,
 			}); err != nil {
 				terror.Ackf(ctx, "inrStream Send: %w", err)
 				return genericError
@@ -86,6 +87,7 @@ func (s *Srv) Forward(stream pb.Srv_ForwardServer) error {
 			if req.Closed {
 				if err := stream.Send(&pb.ForwardResponse{
 					Closed: true,
+					Port:   req.Port,
 				}); err != nil {
 					terror.Ackf(ctx, "stream send: %w", err)
 					return genericError
@@ -95,6 +97,7 @@ func (s *Srv) Forward(stream pb.Srv_ForwardServer) error {
 
 			if err := stream.Send(&pb.ForwardResponse{
 				Data: req.Data,
+				Port: req.Port,
 			}); err != nil {
 				terror.Ackf(ctx, "inrStream Send: %w", err)
 				return genericError

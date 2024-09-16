@@ -1,0 +1,9 @@
+#!/bin/sh
+
+tee << EOF > /out/app/Dockerfile
+FROM busybox
+
+CMD ["echo", "hello,", "world!"]
+EOF
+
+echo builtin:dockerfile | tee > /out/state/next

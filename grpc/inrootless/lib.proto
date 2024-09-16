@@ -17,9 +17,11 @@ message PingResponse {}
 
 message ForwardRequest {
     bytes data = 1;
+    uint32 port = 2;
 }
 
 message ForwardResponse {
     bytes data = 1;
     bool closed = 2;
+    uint32 port = 3;
 }

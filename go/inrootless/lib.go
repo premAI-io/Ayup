@@ -75,9 +75,10 @@ func RunServer(ctx context.Context, builkitCmdArgs []string) error {
 
 	ctx, buildkitSpan := trace.Span(ctx, "buildkitd")
 	defer buildkitSpan.End()
-	_, pout := proc.Start(ctx, cmd)
 
 	var g errgroup.Group
+
+	_, pout := proc.Start(&g, ctx, cmd)
 
 	g.Go(func() error {
 		for pout := range pout {
@@ -99,7 +100,6 @@ func RunServer(ctx context.Context, builkitCmdArgs []string) error {
 			stopSigFunc()
 			return terror.Errorf(ctx, "serve: %w", err)
 		}
-
 		return nil
 	})
 
