@@ -11,9 +11,9 @@ the client on Linux, Mac and (eventually) Windows.
 were running locally. Applications can also be served on a sub-domain of the server via the builtin
 proxy.
 
-🛠️ Figuring out how to generate, build or serve your app is left to pluggable assistants. These can be
-written in any language and are ran inside a container. They can be chained together like
-middleware.
+🛠️ Figuring out how to generate, build or serve your app is left to [pluggable
+assistants](docs/assistants.md). These can be written in any language and are ran inside a
+container. They can be chained together like middleware.
 
 # State / Roadmap
 
