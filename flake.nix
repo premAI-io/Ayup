@@ -3,9 +3,13 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    nixos-generators = {
+        url = "github:nix-community/nixos-generators";
+        inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
-  outputs = { self, nixpkgs }:
+  outputs = { self, nixpkgs, nixos-generators }:
     let
       system = "x86_64-linux";
       pkgs = import nixpkgs {
@@ -79,7 +83,7 @@
         inherit cli cli-darwin-amd64 cli-darwin-arm64 cli-linux-arm64 cli-linux-amd64;
         inherit server;
 
-        default = cli;
+        default = server;
         dev = pkgs.stdenv.mkDerivation {
           pname = "dev";
           inherit version;
@@ -92,6 +96,27 @@
             wrapProgram $out/bin/dev \
               --prefix PATH : ${ pkgs.lib.makeBinPath buildkitDevPkgs }
           '';
+        };
+
+        ami = nixos-generators.nixosGenerate {
+            system = "${system}";
+            format = "amazon";
+            modules = [
+                ({ config, ... }: {
+                    boot.kernelPackages = pkgs.linuxPackages_6_6;
+                    users.users.ayup = {
+                        isNormalUser = true;
+                        packages = [ server ];
+                    };
+                    amazonImage = {
+                        sizeMB = "auto";
+                        name = "Ayup-${version}-${config.system.nixos.label}-${system}";
+                    };
+                    nix.settings.experimental-features = [ "nix-command" "flakes" ];
+                    networking.firewall.enable = false;
+                })
+                (nixpkgs.outPath + "/nixos/modules/profiles/minimal.nix")
+            ];
         };
      };
     };
