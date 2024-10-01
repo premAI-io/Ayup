@@ -15,7 +15,10 @@ import (
 	"go.opentelemetry.io/otel/sdk/log"
 	"go.opentelemetry.io/otel/sdk/resource"
 	"go.opentelemetry.io/otel/sdk/trace"
-	"go.opentelemetry.io/otel/semconv/v1.25.0"
+	semconv "go.opentelemetry.io/otel/semconv/v1.25.0"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"gopkg.in/natefinch/lumberjack.v2"
 
 	tr "go.opentelemetry.io/otel/trace"
 )
@@ -140,6 +143,23 @@ func SetupPyroscopeProfiling(endpoint string) {
 	})
 }
 
+var Zlog *zap.Logger
+
+func SetupZapLogging(logsPath string) {
+	w := zapcore.AddSync(&lumberjack.Logger{
+		Filename:   logsPath,
+		MaxSize:    10, // megabytes
+		MaxBackups: 3,
+		MaxAge:     28, // days
+	})
+	core := zapcore.NewCore(
+		zapcore.NewConsoleEncoder(zap.NewProductionEncoderConfig()),
+		w,
+		zap.InfoLevel,
+	)
+	Zlog = zap.New(core)
+}
+
 type traceContextKey string
 
 const spanKindKey = traceContextKey("spanKind")
@@ -160,11 +180,45 @@ func start(ctx context.Context, name string, opts ...tr.SpanStartOption) (contex
 	return tracer.Start(ctx, name, opts...)
 }
 
+func otelToZattrs(kind string, attrs []attr.KeyValue) []zap.Field {
+	zattrs := make([]zap.Field, len(attrs)+1)
+	zattrs[0] = zap.String("kind", kind)
+
+	for i, a := range attrs {
+		var za zap.Field
+		k := string(a.Key)
+		switch a.Value.Type() {
+		case attr.BOOL:
+			za = zap.Bool(k, a.Value.AsBool())
+		case attr.INT64:
+			za = zap.Int64(k, a.Value.AsInt64())
+		case attr.INT64SLICE:
+			za = zap.Int64s(k, a.Value.AsInt64Slice())
+		case attr.STRING:
+			za = zap.String(k, a.Value.AsString())
+		case attr.STRINGSLICE:
+			za = zap.Strings(k, a.Value.AsStringSlice())
+		default:
+			za = zap.String(k, a.Value.Emit())
+		}
+
+		zattrs[i+1] = za
+	}
+
+	return zattrs
+}
+
 func Span(ctx context.Context, name string, attrs ...attr.KeyValue) (context.Context, tr.Span) {
+	Zlog.Info(name, otelToZattrs("span", attrs)...)
+	_ = Zlog.Sync()
+
 	return start(ctx, name, tr.WithAttributes(attrs...))
 }
 
 func LinkedSpan(ctx context.Context, name string, linkTo tr.Span, newRoot bool, attrs ...attr.KeyValue) (context.Context, tr.Span) {
+	Zlog.Info(name, otelToZattrs("linked span", attrs)...)
+	_ = Zlog.Sync()
+
 	link := tr.Link{
 		SpanContext: linkTo.SpanContext(),
 	}
@@ -172,6 +226,9 @@ func LinkedSpan(ctx context.Context, name string, linkTo tr.Span, newRoot bool, 
 }
 
 func Event(ctx context.Context, name string, attrs ...attr.KeyValue) {
+	Zlog.Info(name, otelToZattrs("event", attrs)...)
+	_ = Zlog.Sync()
+
 	parent := tr.SpanFromContext(ctx)
 	parent.AddEvent(name, tr.WithAttributes(attrs...))
 }

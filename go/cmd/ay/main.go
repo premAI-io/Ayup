@@ -6,14 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime/pprof"
 
 	"go.opentelemetry.io/otel/trace"
 
-	"go.opentelemetry.io/contrib/bridges/otelslog"
 	"go.opentelemetry.io/otel"
 
 	"github.com/alecthomas/kong"
@@ -36,7 +34,6 @@ import (
 type Globals struct {
 	Ctx    context.Context
 	Tracer trace.Tracer
-	Logger *slog.Logger
 }
 
 type PushCmd struct {
@@ -190,6 +187,7 @@ func Main(version []byte) {
 
 	ktx := kong.Parse(&cli, kong.UsageOnError(), kong.Description("Just make it run!"))
 
+	ayTrace.SetupZapLogging(filepath.Join(conf.UserRoot(), "logs"))
 	ayTrace.SetupPyroscopeProfiling(cli.ProfilingEndpoint)
 
 	if cli.TelemetryEndpoint != "" || cli.TelemetryEndpointTraces != "" {
@@ -205,7 +203,6 @@ func Main(version []byte) {
 	}
 
 	tracer := otel.Tracer("premai.io/Ayup/go/internal/trace")
-	logger := otelslog.NewLogger("premai.io/Ayup/go/internal/trace")
 
 	ctx = ayTrace.SetSpanKind(ctx, trace.SpanKindClient)
 	ctx, span := tracer.Start(ctx, "main")
@@ -216,7 +213,6 @@ func Main(version []byte) {
 	err := ktx.Run(Globals{
 		Ctx:    ctx,
 		Tracer: tracer,
-		Logger: logger,
 	})
 
 	if err == nil {
