@@ -125,7 +125,20 @@ func (s *Srv) checkPeerAuth(ctx context.Context) (bool, error) {
 	return false, nil
 }
 
-func (s *Srv) runRootlessBuildkit(g *errgroup.Group, ctx context.Context, selfExe string) (tr.Span, chan<- proc.In, <-chan proc.Out) {
+// TODO: Could be better handled in upstream change to buildkit by setting the cache path
+func fixupCni(ctx context.Context) (string, error) {
+	if _, err := os.Stat("/var/lib/cni"); err != nil {
+		if os.IsNotExist(err) {
+			return "/var/lib", nil
+		}
+
+		return "", terror.Errorf(ctx, "os Stat(%s): %w", "/var/lib/cni", err)
+	}
+
+	return "/var/lib/cni", nil
+}
+
+func (s *Srv) runRootlessBuildkit(g *errgroup.Group, ctx context.Context, selfExe string, cniVarPath string) (tr.Span, chan<- proc.In, <-chan proc.Out) {
 	ctx, span := trace.Span(ctx, "start buildkit")
 
 	s.BuildkitdAddr = "unix://" + filepath.Join(conf.UserRuntimeDir(), "buildkit", "buildkit.sock")
@@ -134,8 +147,7 @@ func (s *Srv) runRootlessBuildkit(g *errgroup.Group, ctx context.Context, selfEx
 		"--port-driver=builtin",
 		"--net=slirp4netns",
 		"--copy-up=/etc",
-		// TODO: Could be better handled in upstream change to buildkit
-		"--copy-up=/var/lib/cni",
+		"--copy-up=" + cniVarPath,
 		"--disable-host-loopback",
 		"--detach-netns",
 
@@ -162,6 +174,11 @@ func (s *Srv) RunServer(pctx context.Context) (err error) {
 	ctx := trace.SetSpanKind(pctx, tr.SpanKindServer)
 	ctx, span := trace.Span(ctx, "start srv")
 	defer span.End()
+
+	cniVarPath, err := fixupCni(ctx)
+	if err != nil {
+		return err
+	}
 
 	ctx, stopSigFunc := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stopSigFunc()
@@ -238,7 +255,7 @@ func (s *Srv) RunServer(pctx context.Context) (err error) {
 
 	var g errgroup.Group
 
-	buildkitSpan, _, buildkitOut := s.runRootlessBuildkit(&g, ctx, selfExe)
+	buildkitSpan, _, buildkitOut := s.runRootlessBuildkit(&g, ctx, selfExe, cniVarPath)
 
 	var wg sync.WaitGroup
 	defer wg.Wait()
