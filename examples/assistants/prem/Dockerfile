@@ -8,4 +8,5 @@ COPY --link ./requirements.txt /assistant/requirements.txt
 RUN --mount=type=cache,target=/root/.cache/pip pip install -r /assistant/requirements.txt
 
 COPY --link . /assistant
-COPY --link --chmod=555 ./cmd /assistant/cmd
+
+ENTRYPOINT ["python", "/assistant/__main__.py"]
