@@ -1,5 +1,5 @@
 {
-  description = "Ayup";
+  description = "Quickly and securely turn any Linux box into a build and deployment assistant";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
