@@ -20,6 +20,7 @@ import (
 	"github.com/muesli/termenv"
 
 	"premai.io/Ayup/go/cli/assistants"
+	"premai.io/Ayup/go/cli/daemon"
 	"premai.io/Ayup/go/cli/key"
 	"premai.io/Ayup/go/cli/login"
 	"premai.io/Ayup/go/cli/push"
@@ -34,6 +35,14 @@ import (
 type Globals struct {
 	Ctx    context.Context
 	Tracer trace.Tracer
+}
+
+type DaemonPreauthCmd struct {
+	P2pPrivKey string `env:"AYUP_CLIENT_P2P_PRIV_KEY" help:"The client's private key, generated automatically if not set"`
+}
+
+func (s *DaemonPreauthCmd) Run(g Globals) (err error) {
+	return daemon.RunPreauth(g.Ctx, s.P2pPrivKey)
 }
 
 type PushCmd struct {
@@ -133,23 +142,20 @@ func (s *AssistantsList) Run(g Globals) error {
 }
 
 var cli struct {
-	Login LoginCmd `cmd:"" help:"Login to the Ayup service"`
+	Login LoginCmd `group:"Client:" cmd:"" help:"Login to the Ayup service"`
 
 	Daemon struct {
 		Start           DaemonStartCmd           `cmd:"" help:"Start an Ayup service Daemon"`
 		StartInRootless DaemonStartInRootlessCmd `cmd:"" passthrough:"" help:"Start a utility daemon to do tasks such as port forwarding in the Rootlesskit namesapce" hidden:""`
-	} `cmd:"" help:"Self host Ayup on Linux"`
-
-	Key struct {
-		New KeyNewCmd `cmd:"" help:"Create a new private key"`
-	} `cmd:"" help:"Manage encryption keys used by Ayup"`
+		Preauth         DaemonPreauthCmd         `cmd:"" help:"Create a server config where this client's peer ID is pre-authorised"`
+	} `group:"Server:" cmd:"" help:"Self host Ayup on Linux"`
 
 	App struct {
 		Path string `env:"AYUP_APP_PATH" help:"The path to application source directory. The current working directory is used if not set"`
 
 		Push      PushCmd           `cmd:"" help:"Figure out how to deploy your application"`
 		Assistant StateAssistantCmd `cmd:"" help:"Set or get the first assistant to run. Left unset we'll try to detect what to run"`
-	} `cmd:"" help:"Manage the application state"`
+	} `group:"Client:" cmd:"" help:"Manage the application state"`
 
 	Assistants struct {
 		Host       string `env:"AYUP_PUSH_HOST" default:"localhost:50051" help:"The location of a service we can push to"`
@@ -157,13 +163,13 @@ var cli struct {
 
 		Push AssistantsPush `cmd:"" help:"Upload a 'local' assistant to the server using its source"`
 		List AssistantsList `cmd:"" help:"List the available assistants on the server"`
-	} `cmd:"" help:"Manage build and deployment assistants"`
+	} `group:"Client:" cmd:"" help:"Manage build and deployment assistants"`
 
 	// maybe effected by https://github.com/open-telemetry/opentelemetry-go/issues/5562
 	// also https://github.com/moby/moby/issues/46129#issuecomment-2016552967
-	TelemetryEndpoint       string `group:"monitoring" env:"OTEL_EXPORTER_OTLP_ENDPOINT" help:"the host that telemetry data is sent to; e.g. http://localhost:4317"`
-	TelemetryEndpointTraces string `group:"monitoring" env:"OTEL_EXPORTER_OTLP_TRACES_ENDPOINT" help:"the host that traces data is sent to http://localhost:4317"`
-	ProfilingEndpoint       string `group:"monitoring" env:"PYROSCOPE_ADHOC_SERVER_ADDRESS" help:"URL performance data is sent to; e.g. http://localhost:4040"`
+	TelemetryEndpoint       string `group:"Monitoring:" env:"OTEL_EXPORTER_OTLP_ENDPOINT" help:"the host that telemetry data is sent to; e.g. http://localhost:4317"`
+	TelemetryEndpointTraces string `group:"Monitoring:" env:"OTEL_EXPORTER_OTLP_TRACES_ENDPOINT" help:"the host that traces data is sent to http://localhost:4317"`
+	ProfilingEndpoint       string `group:"Monitoring:" env:"PYROSCOPE_ADHOC_SERVER_ADDRESS" help:"URL performance data is sent to; e.g. http://localhost:4040"`
 }
 
 func Main(version []byte) {
@@ -180,7 +186,8 @@ func Main(version []byte) {
 		log.Fatalln(err)
 	}
 	version = semver.GetAyupVersion().Bytes()
-	fmt.Print(titleStyle.Render("Ayup!"), " ", versionStyle.Render("v"+string(version), "\n\n"))
+	fmt.Fprintln(os.Stderr, titleStyle.Render("Ayup!"), versionStyle.Render("v"+string(version)))
+	fmt.Fprintln(os.Stderr)
 
 	confDir := conf.UserConfigDir()
 	godotenvLoadErr := godotenv.Load(filepath.Join(confDir, "env"))
