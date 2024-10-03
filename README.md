@@ -111,7 +111,15 @@ the Ayup server so that you can interactively authorize the client.
 > to be replaced with the host's public IP or DNS name. For e.g
 > `/dns4/example.com/tcp/50051/p2p/1...`
 
-Clients can also be pre-authorized by adding their peer IDs to `AYUP_P2P_AUTHORIZED_CLIENTS`
+Clients can also be pre-authorized by adding their peer IDs to `AYUP_P2P_AUTHORIZED_CLIENTS`. A
+server config can be generated with the current client pre-authorized.
+
+```sh
+$ ay daemon preauth > env
+```
+
+Assuming Ayup runs under the ayup user, the `env` file can be written to
+`/home/ayup/.config/ayup/env` or you can set the contained environment variables some other way
 
 ## Client
 
@@ -125,7 +133,7 @@ something like:
 $ ay login /ip4/192.168.0.1/tcp/50051/p2p/1...
 ```
 
-If you need to get the clients peer ID to pre-authorize it then just run login with a nonsense
+If you need to get the client's peer ID to pre-authorize it then just run login with a nonsense
 address
 
 ```
@@ -147,7 +155,7 @@ can also set environment variables in `~/.config/ayup/env` which is in the usual
 Settings you choose interactively will be persisted to the env file if possible. Command line switches and
 environment variables take precedence over the env file.
 
-You can see all available config using the `--help` switch e.g. `ay push --help`, `ay daemon start
+You can see all available config using the `--help` switch e.g. `ay app push --help`, `ay daemon start
 --help`
 
 ## Examples
