@@ -45,7 +45,7 @@
         inherit version;
         dontPatchShebangs = true;
       };
-      vendorHash = "sha256-gC1xFyTP6DsMPDtjmhon8HzotBIhGphGcPBPXgFhNN4="; # pkgs.lib.fakeHash;
+      vendorHash = "sha256-OmNKmih4OSJSp5Thuotn6SB/TLDvMHNmwFdzJxXyAe4="; #pkgs.lib.fakeHash;
       cli = pkgs.callPackage ./distros/nix/cli.nix {
         inherit version vendorHash;
       };
@@ -144,7 +144,7 @@
                     wantedBy = [ "multi-user.target" ];
                     requires = [ "network-online.target" ];
                     serviceConfig = {
-                      ExecStart = "${server}/bin/ay daemon start --host /ip4/0.0.0.0/tcp/50051";
+                      ExecStart = "${server}/bin/ay daemon start --aws --host /ip4/0.0.0.0/tcp/50051";
                       User = "ayup";
                       RuntimeDirectory = "ayup";
                       StateDirectory = "ayup";
