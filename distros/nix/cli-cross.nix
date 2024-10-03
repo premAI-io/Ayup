@@ -1,13 +1,16 @@
 {
-    buildGoModule, version, callPackage, vendorHash,
-    GOOS ? "linux",
-    GOARCH ? "amd64",
+  buildGoModule,
+  version,
+  callPackage,
+  vendorHash,
+  GOOS ? "linux",
+  GOARCH ? "amd64",
 }:
 let
-    srcWithProtobuf = callPackage ./src.nix {
-        dontPatchShebangs = true;
-        inherit version;
-    };
+  srcWithProtobuf = callPackage ./src.nix {
+    dontPatchShebangs = true;
+    inherit version;
+  };
 in
 (buildGoModule {
   pname = "ayup-cli";
@@ -28,4 +31,5 @@ in
   '';
 
   CGO_ENABLED = 0;
-}).overrideAttrs (old: old // { inherit GOOS GOARCH; })
+}).overrideAttrs
+  (old: old // { inherit GOOS GOARCH; })
