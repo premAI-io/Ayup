@@ -156,6 +156,10 @@
                       LogsDirectoryMode = "0700";
                       StandardOutput = "journal";
                       StandardError = "journal";
+                      Environment = [
+                        # Give access to newuidmap/newgidmap with suid bit set
+                        "PATH=$PATH:/run/wrappers/bin"
+                      ];
                     };
                   };
                 };
