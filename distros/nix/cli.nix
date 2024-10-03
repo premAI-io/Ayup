@@ -1,8 +1,12 @@
 {
-    buildGoModule, version, callPackage, golangci-lint, vendorHash
+  buildGoModule,
+  version,
+  callPackage,
+  golangci-lint,
+  vendorHash,
 }:
 let
-    srcWithProtobuf = callPackage ./src.nix { inherit version; };
+  srcWithProtobuf = callPackage ./src.nix { inherit version; };
 in
 buildGoModule {
   pname = "ayup-cli";

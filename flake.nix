@@ -4,26 +4,31 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     nixos-generators = {
-        url = "github:nix-community/nixos-generators";
-        inputs.nixpkgs.follows = "nixpkgs";
+      url = "github:nix-community/nixos-generators";
+      inputs.nixpkgs.follows = "nixpkgs";
     };
   };
 
-  outputs = { self, nixpkgs, nixos-generators }:
+  outputs =
+    {
+      self,
+      nixpkgs,
+      nixos-generators,
+    }:
     let
       system = "x86_64-linux";
       pkgs = import nixpkgs {
         inherit system;
       };
-      buildkit-cni-plugins = pkgs.callPackage ./distros/nix/buildkit-cni.nix {};
+      buildkit-cni-plugins = pkgs.callPackage ./distros/nix/buildkit-cni.nix { };
       buildkitDevPkgs = with pkgs; [
-          slirp4netns
-          rootlesskit
-          runc
-          cni
-          buildkit-cni-plugins
-          buildkit
-          nerdctl
+        slirp4netns
+        rootlesskit
+        runc
+        cni
+        buildkit-cni-plugins
+        buildkit
+        nerdctl
       ];
       goDevPkgs = with pkgs; [
         go
@@ -37,10 +42,10 @@
       ];
       version = builtins.readFile ./go/version.txt;
       src = pkgs.callPackage ./distros/nix/src.nix {
-          inherit version;
-          dontPatchShebangs = true;
+        inherit version;
+        dontPatchShebangs = true;
       };
-      vendorHash = "sha256-gC1xFyTP6DsMPDtjmhon8HzotBIhGphGcPBPXgFhNN4="; #pkgs.lib.fakeHash;
+      vendorHash = "sha256-gC1xFyTP6DsMPDtjmhon8HzotBIhGphGcPBPXgFhNN4="; # pkgs.lib.fakeHash;
       cli = pkgs.callPackage ./distros/nix/cli.nix {
         inherit version vendorHash;
       };
@@ -67,20 +72,32 @@
       server = pkgs.callPackage ./distros/nix/server.nix {
         inherit version cli buildkit-cni-plugins;
       };
-  in
+    in
     {
       devShells.${system}.default = pkgs.mkShell {
         nativeBuildInputs = [ pkgs.pkg-config ];
-        buildInputs = buildkitDevPkgs ++ goDevPkgs ++ pyAnalysis;
+        buildInputs =
+          buildkitDevPkgs
+          ++ goDevPkgs
+          ++ pyAnalysis
+          ++ [
+            pkgs.nixfmt-rfc-style
+          ];
         shellHook = ''
-            export PATH=$PATH:$PWD/bin
-            export AYUP_ASSISTANTS_DIR=$PWD/assistants
+          export PATH=$PATH:$PWD/bin
+          export AYUP_ASSISTANTS_DIR=$PWD/assistants
         '';
       };
 
       packages.${system} = {
         inherit src;
-        inherit cli cli-darwin-amd64 cli-darwin-arm64 cli-linux-arm64 cli-linux-amd64;
+        inherit
+          cli
+          cli-darwin-amd64
+          cli-darwin-arm64
+          cli-linux-arm64
+          cli-linux-amd64
+          ;
         inherit server;
 
         default = server;
@@ -94,30 +111,59 @@
             mkdir -p $out/bin
             cp start-dev-services.sh $out/bin/dev
             wrapProgram $out/bin/dev \
-              --prefix PATH : ${ pkgs.lib.makeBinPath buildkitDevPkgs }
+              --prefix PATH : ${pkgs.lib.makeBinPath buildkitDevPkgs}
           '';
         };
 
         ami = nixos-generators.nixosGenerate {
-            system = "${system}";
-            format = "amazon";
-            modules = [
-                ({ config, ... }: {
-                    boot.kernelPackages = pkgs.linuxPackages_6_6;
-                    users.users.ayup = {
-                        isNormalUser = true;
-                        packages = [ server ];
+          system = "${system}";
+          format = "amazon";
+          modules = [
+            (
+              { config, ... }:
+              {
+                boot.kernelPackages = pkgs.linuxPackages_6_6;
+                users.users.ayup = {
+                  isNormalUser = true;
+                  packages = [ server ];
+                };
+                amazonImage = {
+                  sizeMB = "auto";
+                  name = "Ayup-${version}-${config.system.nixos.label}-${system}";
+                };
+                nix.settings.experimental-features = [
+                  "nix-command"
+                  "flakes"
+                ];
+                networking.firewall.enable = false;
+
+                systemd.services = {
+                  ayup = {
+                    description = "Ayup Deamon";
+                    after = [ "multi-user.target" ];
+                    wantedBy = [ "multi-user.target" ];
+                    requires = [ "network-online.target" ];
+                    serviceConfig = {
+                      ExecStart = "${server}/bin/ay daemon start --host /ip4/0.0.0.0/tcp/50051";
+                      User = "ayup";
+                      RuntimeDirectory = "ayup";
+                      StateDirectory = "ayup";
+                      CacheDirectory = "ayup";
+                      ConfigurationDirectory = "ayup";
+                      RuntimeDirectoryMode = "0700";
+                      StateDirectoryMode = "0700";
+                      CacheDirectoryMode = "0700";
+                      LogsDirectoryMode = "0700";
+                      StandardOutput = "journal";
+                      StandardError = "journal";
                     };
-                    amazonImage = {
-                        sizeMB = "auto";
-                        name = "Ayup-${version}-${config.system.nixos.label}-${system}";
-                    };
-                    nix.settings.experimental-features = [ "nix-command" "flakes" ];
-                    networking.firewall.enable = false;
-                })
-                (nixpkgs.outPath + "/nixos/modules/profiles/minimal.nix")
-            ];
+                  };
+                };
+              }
+            )
+            (nixpkgs.outPath + "/nixos/modules/profiles/minimal.nix")
+          ];
         };
-     };
+      };
     };
 }
