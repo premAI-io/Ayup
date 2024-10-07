@@ -20,6 +20,7 @@ import (
 	"github.com/muesli/termenv"
 
 	"premai.io/Ayup/go/cli/assistants"
+	"premai.io/Ayup/go/cli/cloud/aws"
 	"premai.io/Ayup/go/cli/daemon"
 	"premai.io/Ayup/go/cli/key"
 	"premai.io/Ayup/go/cli/login"
@@ -37,12 +38,25 @@ type Globals struct {
 	Tracer trace.Tracer
 }
 
+type AwsStartCmd struct {
+	CliP2pPrivKey string `env:"AYUP_CLIENT_P2P_PRIV_KEY" help:"The client's private key, generated automatically if not set"`
+}
+
+func (s *AwsStartCmd) Run(g Globals) (err error) {
+	srvPeerId, preauthConf, err := daemon.PreauthConf(g.Ctx, s.CliP2pPrivKey)
+	if err != nil {
+		return err
+	}
+
+	return aws.StartEc2(g.Ctx, srvPeerId.String(), preauthConf)
+}
+
 type DaemonPreauthCmd struct {
-	P2pPrivKey string `env:"AYUP_CLIENT_P2P_PRIV_KEY" help:"The client's private key, generated automatically if not set"`
+	CliP2pPrivKey string `env:"AYUP_CLIENT_P2P_PRIV_KEY" help:"The client's private key, generated automatically if not set"`
 }
 
 func (s *DaemonPreauthCmd) Run(g Globals) (err error) {
-	return daemon.RunPreauth(g.Ctx, s.P2pPrivKey)
+	return daemon.RunPreauth(g.Ctx, s.CliP2pPrivKey)
 }
 
 type PushCmd struct {
@@ -143,6 +157,12 @@ func (s *AssistantsList) Run(g Globals) error {
 
 var cli struct {
 	Login LoginCmd `group:"Client:" cmd:"" help:"Login to the Ayup service"`
+
+	Cloud struct {
+		Aws struct {
+			Start AwsStartCmd `cmd:"" help:"Start, and authenticate with, an Ayup server on your AWS account"`
+		} `cmd:"" help:"Amazon"`
+	} `group:"Server:" cmd:"" help:"Host Ayup using cloud providers"`
 
 	Daemon struct {
 		Start           DaemonStartCmd           `cmd:"" help:"Start an Ayup service Daemon"`

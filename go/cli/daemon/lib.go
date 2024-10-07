@@ -16,35 +16,35 @@ import (
 	"premai.io/Ayup/go/internal/tui"
 )
 
-func RunPreauth(ctx context.Context, b64privKey string) error {
+func PreauthConf(ctx context.Context, cliPrivKeyB64 string) (peer.ID, string, error) {
 	ctx, span := trace.Span(ctx, "preauth")
 	defer span.End()
 
-	cliPrivKey, err := rpc.EnsurePrivKey(ctx, "AYUP_CLIENT_P2P_PRIV_KEY", b64privKey)
+	cliPrivKey, err := rpc.EnsurePrivKey(ctx, "AYUP_CLIENT_P2P_PRIV_KEY", cliPrivKeyB64)
 	if err != nil {
-		return err
+		return peer.ID(""), "", err
 	}
 
 	cliPeerId, err := peer.IDFromPrivateKey(cliPrivKey)
 	if err != nil {
-		return terror.Errorf(ctx, "peer IDFromPrivateKey: %w", err)
+		return peer.ID(""), "", terror.Errorf(ctx, "peer IDFromPrivateKey: %w", err)
 	}
 
 	srvPrivKey, pub, err := crypto.GenerateEd25519Key(nil)
 	if err != nil {
-		return terror.Errorf(ctx, "crypto GenerateEd25519Key: %w", err)
+		return peer.ID(""), "", terror.Errorf(ctx, "crypto GenerateEd25519Key: %w", err)
 	}
 
 	pbSrvPrivKey, err := crypto.MarshalPrivateKey(srvPrivKey)
 	if err != nil {
-		return terror.Errorf(ctx, "crypto marshalPrivateKey: %w", err)
+		return peer.ID(""), "", terror.Errorf(ctx, "crypto marshalPrivateKey: %w", err)
 	}
 
 	b64SrvPrivKey := base64.StdEncoding.EncodeToString(pbSrvPrivKey)
 
 	srvPeerId, err := peer.IDFromPublicKey(pub)
 	if err != nil {
-		return terror.Errorf(ctx, "peer IDFromPublicKey: %w", err)
+		return peer.ID(""), "", terror.Errorf(ctx, "peer IDFromPublicKey: %w", err)
 	}
 
 	confMap := map[string]string{
@@ -54,7 +54,16 @@ func RunPreauth(ctx context.Context, b64privKey string) error {
 
 	confText, err := godotenv.Marshal(confMap)
 	if err != nil {
-		return terror.Errorf(ctx, "godotenv Marshal: %w", err)
+		return peer.ID(""), "", terror.Errorf(ctx, "godotenv Marshal: %w", err)
+	}
+
+	return srvPeerId, confText, nil
+}
+
+func RunPreauth(ctx context.Context, b64privKey string) error {
+	srvPeerId, confText, err := PreauthConf(ctx, b64privKey)
+	if err != nil {
+		return err
 	}
 
 	fmt.Fprintln(os.Stderr, tui.VersionStyle.Render("Printing server environment variables to stdout. You can save this configuration to ~/.config/ayup/env or set the environment some other way"))

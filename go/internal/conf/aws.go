@@ -6,6 +6,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
+	"go.opentelemetry.io/contrib/instrumentation/github.com/aws/aws-sdk-go-v2/otelaws"
+
 	"premai.io/Ayup/go/internal/terror"
 )
 
@@ -14,6 +16,8 @@ func LoadConfigFromAWS(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", terror.Errorf(ctx, "config LoadDefaultConfig: %w", err)
 	}
+
+	otelaws.AppendMiddlewares(&cfg.APIOptions)
 
 	svc := secretsmanager.NewFromConfig(cfg)
 
